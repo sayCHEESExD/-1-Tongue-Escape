@@ -30,9 +30,10 @@ const EXPECTED = [
   { path: 'assets/ui/trophy.png', md5: 'e57cb95031c6a5feb6142eb05b53e7c1' },
   { path: 'assets/ui/rebirth.png', md5: '022dccdad65f256a546d2a14baf7512a' },
   { path: 'assets/ui/trail.png', md5: 'fb6c8242f2f61c64569c7cce49879652' },
-  // The two sounds: the music track, and the fall into the lava.
+  // The three sounds: the music track, the fall into the lava, and the tongue throw.
   { path: 'assets/audio/Background.mp3', md5: '1f1d91a0649db55386b984c3b55422a3' },
   { path: 'assets/audio/fall.mp3', md5: 'a6c361490b027a8effd0ac861936a5a7' },
+  { path: 'assets/audio/tongue.mp3', md5: '190c1c14a1d5ce9e196aef7cda8178c6' },
 ];
 
 let failures = 0;

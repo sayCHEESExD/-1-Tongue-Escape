@@ -58,6 +58,8 @@ const MUSIC_URL = '/audio/Background.mp3';
 const SAMPLE_URLS: Partial<Record<SoundName, string>> = {
   // The supplied fall: every death here is a drop into the lava.
   death: '/audio/fall.mp3',
+  // The supplied tongue: the throw, as the tongue leaves the mouth.
+  tongue: '/audio/tongue.mp3',
 };
 
 /**
@@ -479,7 +481,9 @@ export class AudioManager {
     const level = Math.min(Math.max(intensity, 0), 1);
     switch (name) {
       case 'tongue':
-        // THE THROW: a wet, stretchy rising "thwip".
+        // THE THROW: the supplied tongue sound, falling back to a synthesised
+        // wet, stretchy rising "thwip" if the file is missing or blocked.
+        if (this.playSample('tongue', now, 0.8 * level)) break;
         this.blip(now, 'sine', 180, 1100, 0.2, 0.5 * level);
         this.blip(now + 0.03, 'triangle', 420, 1600, 0.12, 0.2 * level);
         break;
