@@ -193,6 +193,14 @@ export class MovementService {
     player.tongueEX = m.ex;
     player.tongueEY = m.ey;
     player.tongueEZ = m.ez;
+    player.tongueYaw0 = m.tongueYaw0;
+    player.tongueMax = m.tongueMax;
+    player.tongueSeg = m.tongueSeg;
+    // The path only grows during a throw and starts over with the next one.
+    const path = player.tonguePath;
+    const laid = m.tongueHeadings;
+    if (laid.length < path.length) path.clear();
+    for (let i = path.length; i < laid.length; i += 1) path.push(laid[i] as number);
     player.lastInputSeq = sim.lastSeq;
     player.ready = true;
   }

@@ -1,4 +1,4 @@
-import { Schema, type } from '@colyseus/schema';
+import { ArraySchema, Schema, type } from '@colyseus/schema';
 import { AvatarState } from './AvatarState.js';
 import {
   PlayerAnimationState,
@@ -51,6 +51,15 @@ export class PlayerState extends Schema {
   @type('float32') tongueEX = 0;
   @type('float32') tongueEY = 0;
   @type('float32') tongueEZ = 0;
+  /**
+   * THE STEERED PATH the player is laying (or has laid): its first heading, the
+   * Tongue Length it was thrown with, its segment length, and one heading per
+   * segment. It only grows during a throw, so a patch carries the new segments.
+   */
+  @type('float32') tongueYaw0 = 0;
+  @type('float32') tongueMax = 0;
+  @type('float32') tongueSeg = 0;
+  @type(['float32']) tonguePath = new ArraySchema<number>();
 
   @type('uint32') deathCount = 0;
   /** Treadmill the player is standing on, or 0. Derived by the simulation. */

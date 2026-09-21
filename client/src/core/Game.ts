@@ -38,6 +38,7 @@ import { ICONS } from '../ui/hudStyles.js';
 import { injectTongueStyles } from '../ui/tongueStyles.js';
 import { logger } from '../util/logger.js';
 import { CourseWorld } from '../world/CourseWorld.js';
+import { setTongueGroundProbe } from '../effects/TongueRenderer.js';
 
 const SCOPE = 'Game';
 
@@ -277,6 +278,11 @@ export class Game {
 
   async initialise(): Promise<PlayerModelReport> {
     this.world.addTo(this.sceneManager.scene);
+    // A tongue being steered is drawn ending where the simulation would freeze it.
+    const landing = { x: 0, y: 0, z: 0, hit: false };
+    setTongueGroundProbe((x, z, path) =>
+      this.world.collision.tongueCandidate(x, z, path.sx, path.sy, path.sz, path.tongueMax, landing) ? landing.y : null,
+    );
     const report = await playerModelLoader.load();
 
     this.localPlayer = new LocalPlayer(this.world.collision);
@@ -454,6 +460,10 @@ export class Game {
         tongueEX: state.tongueEX,
         tongueEY: state.tongueEY,
         tongueEZ: state.tongueEZ,
+        tongueYaw0: state.tongueYaw0,
+        tongueMax: state.tongueMax,
+        tongueSeg: state.tongueSeg,
+        tonguePath: state.tonguePath,
       });
     }
 

@@ -13,6 +13,7 @@ Three.js client, authoritative Colyseus server (15 players per room), hosted on 
 | Walk | WASD / arrows | left stick |
 | Look | mouse | drag |
 | Throw tongue | left click or Space | TONGUE button |
+| Steer the tongue while it flies out | WASD / arrows | left stick |
 | Trails menu | T | Trails tile |
 | Rebirth menu | R | Rebirth tile |
 | Music | M | Music tile |

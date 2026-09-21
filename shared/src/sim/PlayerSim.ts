@@ -3,12 +3,15 @@ import { MOVEMENT } from '../config/movement.js';
 import {
   TONGUE,
   TonguePhase,
-  tongueDistance,
-  tongueExtendSeconds,
+  createLaidTonguePath,
+  layTonguePath,
+  sampleTonguePath,
+  steerTongueHeading,
+  tongueExtendSpeed,
   tongueGlideSeconds,
   tongueGlideU,
-  tonguePointAt,
-  type TongueArc,
+  tongueSegmentsFor,
+  type TonguePathState,
 } from '../config/tongue.js';
 import { PLAYER_HEIGHT, SPAWN_POSITION, SPAWN_ROTATION_Y } from '../constants/world.js';
 import { rotateTowards } from '../types/math.js';
@@ -20,11 +23,11 @@ import type { TongueTarget, WorldCollision } from './WorldCollision.js';
  * The server runs it to own the result and the client runs the identical
  * function to predict ahead of the network, so the two can only disagree
  * through inputs, never through maths. Two ways to move and no others:
- * WALKING, and the TONGUE throw (windup, extend, glide). There is no jump.
+ * WALKING, and the TONGUE throw (windup, a STEERED deploy, the glide). There is no jump.
  */
 
 /** Everything that makes up a player's physical state. */
-export interface PlayerMotion extends TongueArc {
+export interface PlayerMotion extends TonguePathState {
   x: number;
   y: number;
   z: number;
@@ -45,6 +48,8 @@ export interface PlayerMotion extends TongueArc {
   tongueLatched: boolean;
   /** Monotonic count of throws, so a remote can mirror them. */
   tongueCount: number;
+  /** The steered path laid so far: one heading per segment. */
+  tongueHeadings: number[];
 }
 
 /** One frame of player intent. Carries no position - only what was pressed. */
@@ -97,6 +102,10 @@ export const createMotion = (): PlayerMotion => ({
   ex: 0,
   ey: 0,
   ez: 0,
+  tongueYaw0: 0,
+  tongueMax: 0,
+  tongueSeg: 0,
+  tongueHeadings: [],
 });
 
 export const createSimEvents = (): SimEvents => ({
@@ -129,6 +138,11 @@ export const copyMotion = (from: PlayerMotion, to: PlayerMotion): void => {
   to.ex = from.ex;
   to.ey = from.ey;
   to.ez = from.ez;
+  to.tongueYaw0 = from.tongueYaw0;
+  to.tongueMax = from.tongueMax;
+  to.tongueSeg = from.tongueSeg;
+  to.tongueHeadings.length = 0;
+  for (const heading of from.tongueHeadings) to.tongueHeadings.push(heading);
 };
 
 /** Reset to a spawn transform. Cancels any throw. */
@@ -152,6 +166,7 @@ export const resetMotion = (
   motion.tongueTime = 0;
   motion.tongueHit = false;
   motion.tongueLatched = false;
+  motion.tongueHeadings.length = 0;
 };
 
 export const horizontalSpeed = (motion: PlayerMotion): number => Math.hypot(motion.vx, motion.vz);
@@ -172,6 +187,8 @@ export const sanitiseInput = (input: Partial<MovementInput> | undefined): Moveme
 const BOUNDS = { x: 0, z: 0 };
 const TARGET: TongueTarget = { x: 0, y: 0, z: 0, hit: false };
 const POINT = { x: 0, y: 0, z: 0 };
+const TIP = { x: 0, z: 0 };
+const LAID = createLaidTonguePath();
 
 /**
  * Advance one player by one step.
@@ -202,9 +219,10 @@ export const stepPlayer = (
   const pressed = input.tongue && !motion.tongueLatched;
   motion.tongueLatched = input.tongue;
 
-  // A throw in progress owns the body until it lands.
+  // A throw in progress owns the body until it lands. While it deploys, the
+  // movement controls STEER THE TONGUE instead of walking the body.
   if (motion.tonguePhase !== TonguePhase.None) {
-    advanceTongue(motion, dt, events);
+    advanceTongue(motion, input, collision, dt, events);
     motion.treadmill = 0;
     return;
   }
@@ -228,7 +246,11 @@ export const stepPlayer = (
   if (!wasGrounded && motion.grounded) events.landed = true;
 };
 
-/** Find the target and start the windup. False when there is nothing to throw at. */
+/**
+ * Start a throw: the windup. The path starts at the feet, heading the way the
+ * camera faces. False (no throw) only when the very first stretch is blocked
+ * by a wall and is not a platform - there is no room to throw at all.
+ */
 const beginThrow = (
   motion: PlayerMotion,
   input: MovementInput,
@@ -236,28 +258,133 @@ const beginThrow = (
   collision: WorldCollision,
 ): boolean => {
   const length = Number.isFinite(params.length) && params.length > 0 ? params.length : TONGUE.baseLength;
-  if (!collision.findTongueTarget(motion.x, motion.y, motion.z, input.cameraYaw, length, TARGET)) return false;
+  const { seg } = tongueSegmentsFor(length);
+  const yaw = input.cameraYaw;
+  const fx = motion.x + Math.sin(yaw) * seg;
+  const fz = motion.z + Math.cos(yaw) * seg;
+  const firstFree =
+    collision.inBounds(fx, fz) &&
+    (!collision.bodyBlocked(fx, motion.y, fz) ||
+      collision.tongueCandidate(fx, fz, motion.x, motion.y, motion.z, length, TARGET));
+  if (!firstFree) return false;
+
   motion.sx = motion.x;
   motion.sy = motion.y;
   motion.sz = motion.z;
-  motion.ex = TARGET.x;
-  motion.ey = TARGET.y;
-  motion.ez = TARGET.z;
-  motion.tongueHit = TARGET.hit;
+  motion.ex = motion.x;
+  motion.ey = motion.y;
+  motion.ez = motion.z;
+  motion.tongueHit = false;
+  motion.tongueYaw0 = yaw;
+  motion.tongueMax = length;
+  motion.tongueSeg = seg;
+  motion.tongueHeadings.length = 0;
   motion.tonguePhase = TonguePhase.Windup;
   motion.tongueTime = 0;
   motion.tongueCount += 1;
   motion.vx = 0;
   motion.vy = 0;
   motion.vz = 0;
-  motion.yaw = Math.atan2(TARGET.x - motion.x, TARGET.z - motion.z);
+  motion.yaw = yaw;
   return true;
 };
 
-/** Windup, extend, glide: rooted for the first two, riding the curve for the third. */
-const advanceTongue = (motion: PlayerMotion, dt: number, events: SimEvents): void => {
+/** The laid point `index` of the path (0 = the start), into `out`. */
+const pathPoint = (motion: PlayerMotion, index: number, out: { x: number; z: number }): void => {
+  out.x = motion.sx;
+  out.z = motion.sz;
+  for (let i = 0; i < index; i += 1) {
+    const h = motion.tongueHeadings[i] as number;
+    out.x += Math.sin(h) * motion.tongueSeg;
+    out.z += Math.cos(h) * motion.tongueSeg;
+  }
+};
+
+/**
+ * FREEZE THE PATH at its current tip. The tongue sticks when the tip is over a
+ * platform, and otherwise ends in the air at the height it left from; the
+ * ride begins.
+ */
+const lockPath = (motion: PlayerMotion, collision: WorldCollision, events: SimEvents): void => {
+  const n = motion.tongueHeadings.length;
+  if (n === 0) {
+    // Nothing was laid: there is no path to ride.
+    motion.tonguePhase = TonguePhase.None;
+    motion.tongueTime = 0;
+    return;
+  }
+  pathPoint(motion, n, TIP);
+  const along = n * motion.tongueSeg;
+  if (along >= TONGUE.stickMinDistance && collision.tongueCandidate(TIP.x, TIP.z, motion.sx, motion.sy, motion.sz, motion.tongueMax, TARGET)) {
+    motion.ex = TARGET.x;
+    motion.ey = TARGET.y;
+    motion.ez = TARGET.z;
+    motion.tongueHit = true;
+  } else {
+    motion.ex = TIP.x;
+    motion.ey = motion.sy;
+    motion.ez = TIP.z;
+    motion.tongueHit = false;
+  }
+  motion.tonguePhase = TonguePhase.Glide;
+  motion.tongueTime = 0;
+  motion.grounded = false;
+  events.tongueAttached = true;
+};
+
+/**
+ * DEPLOY: lay the path one segment at a time, each turned toward what the
+ * player holds. Stops - and freezes - when the path leaves a platform it had
+ * reached (sticking to that platform), when the next segment would run into a
+ * wall or out of the world, or when the Tongue Length is used up.
+ */
+const extendTongue = (
+  motion: PlayerMotion,
+  input: MovementInput,
+  collision: WorldCollision,
+  events: SimEvents,
+): void => {
+  const { count } = tongueSegmentsFor(motion.tongueMax);
+  const reached = motion.tongueTime * tongueExtendSpeed(motion.tongueMax);
+  while (motion.tongueHeadings.length < count && (motion.tongueHeadings.length + 1) * motion.tongueSeg <= reached + 1e-9) {
+    const n = motion.tongueHeadings.length;
+    const heading = steerTongueHeading(
+      n === 0 ? motion.tongueYaw0 : (motion.tongueHeadings[n - 1] as number),
+      input.moveX,
+      input.moveZ,
+      input.cameraYaw,
+      motion.tongueSeg,
+    );
+    pathPoint(motion, n, TIP);
+    const px = TIP.x + Math.sin(heading) * motion.tongueSeg;
+    const pz = TIP.z + Math.cos(heading) * motion.tongueSeg;
+    const along = (n + 1) * motion.tongueSeg;
+    const onPlatform =
+      along >= TONGUE.stickMinDistance &&
+      collision.tongueCandidate(px, pz, motion.sx, motion.sy, motion.sz, motion.tongueMax, TARGET);
+    const wasOnPlatform =
+      n * motion.tongueSeg >= TONGUE.stickMinDistance &&
+      collision.tongueCandidate(TIP.x, TIP.z, motion.sx, motion.sy, motion.sz, motion.tongueMax, TARGET);
+    const blocked = !collision.inBounds(px, pz) || (!onPlatform && collision.bodyBlocked(px, motion.sy, pz));
+    // Leaving a platform it had reached, or about to hit a wall: freeze here.
+    if (blocked || (wasOnPlatform && !onPlatform)) {
+      lockPath(motion, collision, events);
+      return;
+    }
+    motion.tongueHeadings.push(heading);
+  }
+  if (motion.tongueHeadings.length >= count) lockPath(motion, collision, events);
+};
+
+/** Windup, deploy (steered), glide along the frozen path. */
+const advanceTongue = (
+  motion: PlayerMotion,
+  input: MovementInput,
+  collision: WorldCollision,
+  dt: number,
+  events: SimEvents,
+): void => {
   motion.tongueTime += dt;
-  const distance = tongueDistance(motion);
 
   if (motion.tonguePhase === TonguePhase.Windup) {
     if (motion.tongueTime < TONGUE.windup) return;
@@ -266,15 +393,15 @@ const advanceTongue = (motion: PlayerMotion, dt: number, events: SimEvents): voi
   }
 
   if (motion.tonguePhase === TonguePhase.Extend) {
-    const extend = tongueExtendSeconds(distance);
-    if (motion.tongueTime < extend) return;
-    motion.tongueTime -= extend;
-    motion.tonguePhase = TonguePhase.Glide;
-    motion.grounded = false;
-    events.tongueAttached = true;
+    extendTongue(motion, input, collision, events);
+    // The ride starts on the next step, from the frozen path.
+    return;
   }
 
-  const glide = tongueGlideSeconds(distance);
+  if (motion.tonguePhase !== TonguePhase.Glide) return;
+
+  layTonguePath(motion, 0, true, LAID);
+  const glide = tongueGlideSeconds(LAID.length);
   const px = motion.x;
   const py = motion.y;
   const pz = motion.z;
@@ -304,13 +431,15 @@ const advanceTongue = (motion: PlayerMotion, dt: number, events: SimEvents): voi
     return;
   }
 
-  tonguePointAt(motion, tongueGlideU(motion.tongueTime / glide), POINT);
+  // Ride the exact curve the player laid.
+  sampleTonguePath(LAID, tongueGlideU(motion.tongueTime / glide) * LAID.length, motion.sy, motion.ey, POINT);
   motion.x = POINT.x;
   motion.y = POINT.y;
   motion.z = POINT.z;
   motion.vx = (POINT.x - px) / dt;
   motion.vy = (POINT.y - py) / dt;
   motion.vz = (POINT.z - pz) / dt;
+  if (Math.hypot(motion.vx, motion.vz) > 0.01) motion.yaw = Math.atan2(motion.vx, motion.vz);
   motion.grounded = false;
 };
 

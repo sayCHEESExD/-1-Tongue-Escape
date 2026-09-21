@@ -36,12 +36,12 @@ export interface CourseTriggers {
   treadmill: number;
 }
 
-/** Where a throw will land, written by `findTongueTarget`. */
+/** Where a tongue sticks, written by `tongueCandidate`. */
 export interface TongueTarget {
   x: number;
   y: number;
   z: number;
-  /** True when it attached to a platform; false when it ended in the air at its full length. */
+  /** True when it is a platform to stick to. */
   hit: boolean;
 }
 
@@ -157,35 +157,59 @@ export class WorldCollision {
   }
 
   /**
-   * The platform a tongue can attach to at one column: the highest LANDABLE
-   * solid whose top is in [minY, maxY], that the point is at least
-   * `TONGUE.edgeInset` inside, and with nothing solid over the landing spot.
-   * Null when there is none.
+   * CAN THE TONGUE STICK HERE? The platform under a point on a steered path.
+   *
+   * A landable solid other than the one the throw started on, whose top is
+   * within the tongue's climb and drop of the start height, and whose edge
+   * the point is inside - or within `TONGUE.captureMargin` of, so grazing an
+   * edge still counts. The landing spot is the point pulled `edgeInset` inside
+   * the edge, with nothing solid over it. This never reaches out for a
+   * platform the path did not cross: it answers for one point only.
+   *
+   * @returns true and the landing spot in `out`, or false
    */
-  tongueSolidAt(x: number, z: number, minY: number, maxY: number): CourseSolid | null {
+  tongueCandidate(
+    px: number,
+    pz: number,
+    sx: number,
+    sy: number,
+    sz: number,
+    length: number,
+    out: TongueTarget,
+  ): boolean {
+    this.collectStanding(sx, sy, sz);
+    const top = sy + tongueClimbFor(length);
+    const bottom = sy - TONGUE.maxDrop;
+    const margin = TONGUE.captureMargin;
     const inset = TONGUE.edgeInset;
     let best: CourseSolid | null = null;
-    for (const solid of this.near(z)) {
-      if (!solid.landable) continue;
-      if (solid.maxY < minY || solid.maxY > maxY) continue;
-      if (x < solid.minX + inset || x > solid.maxX - inset) continue;
-      if (z < solid.minZ + inset || z > solid.maxZ - inset) continue;
+    for (const solid of this.near(pz)) {
+      if (!solid.landable || STANDING.indexOf(solid) >= 0) continue;
+      if (solid.maxY < bottom || solid.maxY > top) continue;
+      if (px < solid.minX - margin || px > solid.maxX + margin) continue;
+      if (pz < solid.minZ - margin || pz > solid.maxZ + margin) continue;
+      if (solid.maxX - solid.minX < inset * 2 || solid.maxZ - solid.minZ < inset * 2) continue;
       if (best === null || solid.maxY > best.maxY) best = solid;
     }
-    if (best === null) return null;
-    const top = best.maxY;
-    // Nothing solid - a wall, a console, a higher storey - may occupy the
-    // body's space at the landing.
+    if (best === null) return false;
+    const x = Math.min(Math.max(px, best.minX + inset), best.maxX - inset);
+    const z = Math.min(Math.max(pz, best.minZ + inset), best.maxZ - inset);
+    const y = best.maxY;
+    // Nothing solid - a wall, a console, a higher storey - over the landing.
     for (const solid of this.near(z)) {
       if (x < solid.minX - PLAYER_RADIUS || x > solid.maxX + PLAYER_RADIUS) continue;
       if (z < solid.minZ - PLAYER_RADIUS || z > solid.maxZ + PLAYER_RADIUS) continue;
-      if (solid.maxY > top && solid.minY < top + PLAYER_HEIGHT) return null;
+      if (solid.maxY > y && solid.minY < y + PLAYER_HEIGHT) return false;
     }
-    return best;
+    out.x = x;
+    out.y = y;
+    out.z = z;
+    out.hit = true;
+    return true;
   }
 
   /** True when something solid fills the body's space at this point and height. */
-  private blocked(x: number, y: number, z: number): boolean {
+  bodyBlocked(x: number, y: number, z: number): boolean {
     for (const solid of this.near(z)) {
       if (x < solid.minX - PLAYER_RADIUS || x > solid.maxX + PLAYER_RADIUS) continue;
       if (z < solid.minZ - PLAYER_RADIUS || z > solid.maxZ + PLAYER_RADIUS) continue;
@@ -194,7 +218,7 @@ export class WorldCollision {
     return false;
   }
 
-  /** The solids the feet are standing on, into `STANDING`. */
+  /** The solids the feet are standing on, into `STANDING`. Never a tongue's platform. */
   private collectStanding(x: number, y: number, z: number): void {
     STANDING.length = 0;
     for (const solid of this.near(z)) {
@@ -205,74 +229,6 @@ export class WorldCollision {
     }
   }
 
-  /**
-   * WHERE A THROW GOES. Evaluated by the server against its own state; the
-   * client runs the identical search to predict it.
-   *
-   *  1. A reachable island or platform DIRECTLY AHEAD: along the aim, the
-   *     farthest landable spot within the Tongue Length, on any platform
-   *     other than the one underfoot.
-   *  2. Failing that, the same search a few degrees either side, nearest
-   *     angle first, never beyond `TONGUE.coneDegrees` - the tongue never
-   *     turns sideways, let alone behind, to find something.
-   *  3. Nothing in reach: the tongue flies straight ahead to its FULL LENGTH
-   *     and no further (or to the last free point before a wall), ending in
-   *     the air at the height it left from. The rider races to that end and
-   *     drops wherever it is - onto ground if there is any, into the lava if
-   *     not. An island just out of reach stays out of reach.
-   *
-   * @returns false only when there is no room at all to throw
-   */
-  findTongueTarget(
-    x: number,
-    y: number,
-    z: number,
-    yaw: number,
-    length: number,
-    out: TongueTarget,
-  ): boolean {
-    this.collectStanding(x, y, z);
-    const top = y + tongueClimbFor(length);
-    const bottom = y - TONGUE.maxDrop;
-    const steps = Math.floor((length - TONGUE.minDistance) / TONGUE.sampleStep);
-
-    for (const offset of CONE_OFFSETS) {
-      const angle = yaw + offset;
-      const dirX = Math.sin(angle);
-      const dirZ = Math.cos(angle);
-      for (let i = 0; i <= steps; i += 1) {
-        const d = length - i * TONGUE.sampleStep;
-        const px = x + dirX * d;
-        const pz = z + dirZ * d;
-        if (!this.inBounds(px, pz)) continue;
-        const solid = this.tongueSolidAt(px, pz, bottom, top);
-        if (solid === null || STANDING.indexOf(solid) >= 0) continue;
-        out.x = px;
-        out.y = solid.maxY;
-        out.z = pz;
-        out.hit = true;
-        return true;
-      }
-    }
-
-    // Nothing reachable: the tongue's real length, straight ahead.
-    const dirX = Math.sin(yaw);
-    const dirZ = Math.cos(yaw);
-    let reached = 0;
-    for (let d = TONGUE.sampleStep; d <= length + 1e-9; d += TONGUE.sampleStep) {
-      const px = x + dirX * d;
-      const pz = z + dirZ * d;
-      if (!this.inBounds(px, pz) || this.blocked(px, y, pz)) break;
-      reached = d;
-    }
-    if (reached < TONGUE.minDistance) return false;
-    out.x = x + dirX * reached;
-    out.y = y;
-    out.z = z + dirZ * reached;
-    out.hit = false;
-    return true;
-  }
-
   stageAt(z: number): StageDefinition | null {
     return stageAt(z);
   }
@@ -281,14 +237,6 @@ export class WorldCollision {
 const SCRATCH: CourseSolid[] = [];
 /** The solids underfoot at the start of a throw: never a target. */
 const STANDING: CourseSolid[] = [];
-/** The forward cone, nearest angle first: 0, +6, -6, +12, -12 ... degrees. */
-const CONE_OFFSETS: readonly number[] = (() => {
-  const out = [0];
-  for (let a = TONGUE.coneStepDegrees; a <= TONGUE.coneDegrees + 1e-9; a += TONGUE.coneStepDegrees) {
-    out.push((a * Math.PI) / 180, (-a * Math.PI) / 180);
-  }
-  return out;
-})();
 const EMPTY: readonly CourseSolid[] = [];
 
 const bucketOf = (z: number): number => Math.floor(z / BUCKET_SIZE);

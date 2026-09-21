@@ -64,6 +64,10 @@ const watch = setInterval(() => {
 
 const countBefore = seen().tongueCount;
 await drive({ tongue: true }, 1 / 60);
+// Steer slightly with A while it deploys: the watcher must receive the same bent path.
+await drive({ moveX: -0.3 }, 0.9);
+const thrownPath = [...self().tonguePath];
+const watchedPath = [...seen().tonguePath];
 await drive({}, 2.5);
 await sleep(400);
 clearInterval(watch);
@@ -73,6 +77,8 @@ const island = S.STAGES[0].islands[0];
 check(seen().tongueCount === countBefore + 1, 'the watcher saw one new throw');
 check(phases.has(S.TonguePhase.Windup) && phases.has(S.TonguePhase.Extend) && phases.has(S.TonguePhase.Glide), `the watcher saw windup, extend and glide (${[...phases].sort().join(',')})`);
 check(seen().tongueHit === true, 'the throw attached to ground');
+check(thrownPath.length > 2 && JSON.stringify(thrownPath) === JSON.stringify(watchedPath), `the watcher received the same steered path (${watchedPath.length} segments)`);
+check(new Set(thrownPath.map((h) => h.toFixed(4))).size > 1, 'and it is bent by the steering, not straight');
 check(Math.abs(after.y - island.topY) < 0.01 && Math.abs(after.z - island.z) < island.depth / 2, `the thrower landed on island 1 (y ${after.y.toFixed(2)}, z ${after.z.toFixed(1)})`);
 check(Math.abs(seen().z - after.z) < 0.01, 'the watcher agrees on where they landed');
 check(after.deathCount === before.deathCount, 'nobody burned');

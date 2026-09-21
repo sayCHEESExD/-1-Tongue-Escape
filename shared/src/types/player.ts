@@ -40,6 +40,11 @@ export interface PlayerMotionState {
   tongueEX: number;
   tongueEY: number;
   tongueEZ: number;
+  /** The steered path: initial heading, Tongue Length at the press, segment length, one heading per segment. */
+  tongueYaw0: number;
+  tongueMax: number;
+  tongueSeg: number;
+  tonguePath: ArrayLike<number>;
 }
 
 /** Server-authoritative progression snapshot. */

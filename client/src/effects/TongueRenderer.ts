@@ -1,13 +1,14 @@
 import {
   TONGUE,
   TonguePhase,
-  tongueDistance,
-  tongueExtendSeconds,
+  createLaidTonguePath,
+  layTonguePath,
+  sampleTonguePath,
+  tongueExtendSpeed,
   tongueForSlot,
   tongueGlideSeconds,
   tongueGlideU,
-  tonguePointAt,
-  type TongueArc,
+  type TonguePathState,
   type TongueTier,
 } from '@tongue/shared';
 import {
@@ -27,7 +28,7 @@ import { ParticlePool } from './ParticlePool.js';
 import { tongueTexture } from './tongueTextures.js';
 
 /** Rings along the tongue, plus the rounded tip. */
-const SEGMENTS = 36;
+const SEGMENTS = 48;
 const TIP_RINGS = 4;
 const RINGS = SEGMENTS + 1 + TIP_RINGS;
 const RADIAL = 10;
@@ -46,10 +47,23 @@ const UP = new Vector3(0, 1, 0);
 /** What a throw looks like right now, from the prediction or the replicated state. */
 export interface TongueView {
   phase: TonguePhase;
+  /** Seconds into the current phase. */
   time: number;
-  arc: TongueArc;
+  /** The steered path: start, end once frozen, and the headings laid so far. */
+  path: TonguePathState;
   hit: boolean;
 }
+
+/**
+ * Where a platform would catch the tongue under a point, or null. Set once by
+ * the game from the course's collision, so a tongue still being steered is
+ * drawn ending exactly where the simulation would freeze it.
+ */
+export type TongueGroundProbe = (x: number, z: number, path: TonguePathState) => number | null;
+let groundProbe: TongueGroundProbe = () => null;
+export const setTongueGroundProbe = (probe: TongueGroundProbe): void => {
+  groundProbe = probe;
+};
 
 const smooth = (t: number): number => {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -61,10 +75,11 @@ const smooth = (t: number): number => {
  *
  * One dynamic flattened tube in WORLD space, rebuilt every frame from a
  * centreline: hanging from the mouth at rest (longer with every level), whipped
- * back over the head in the windup, flung out along the throw's arc, and - on
- * the ride - the remaining curve from the mouth to where it is stuck, shrinking
- * as the rider is reeled in. The arc is the SAME curve the simulation moves the
- * rider along (`tonguePointAt`), so what is drawn is what is ridden.
+ * back over the head in the windup, then GROWING ALONG THE PATH THE PLAYER
+ * STEERS as it deploys, and - on the ride - the remaining frozen curve from the
+ * mouth to its end, shrinking as the rider is reeled in. Every point comes from
+ * `layTonguePath` + `sampleTonguePath`, the same maths the simulation moves
+ * the rider along, so what is drawn is what is ridden.
  *
  * Higher tongues glow and shed particles: sparks, embers, stars, drips.
  */
@@ -98,6 +113,7 @@ export class TongueRenderer {
   private readonly offset = new Vector3();
   private readonly scratch = new Vector3();
   private readonly accent = new Color();
+  private readonly laid = createLaidTonguePath();
 
   private tier: TongueTier = tongueForSlot(0);
   private slot = -1;
@@ -211,11 +227,11 @@ export class TongueRenderer {
 
     if (this.lastPhase === TonguePhase.Glide && phase === TonguePhase.None && view) {
       this.retract = 0;
-      this.retractTo.set(view.arc.ex, view.arc.ey, view.arc.ez);
+      this.retractTo.set(view.path.ex, view.path.ey, view.path.ez);
     }
     // A tongue that stuck slaps the platform; one that ran out ends in the air.
     if (this.lastPhase !== TonguePhase.Glide && phase === TonguePhase.Glide && view && view.hit) {
-      this.splatAt(view.arc.ex, view.arc.ey, view.arc.ez, true);
+      this.splatAt(view.path.ex, view.path.ey, view.path.ez, true);
     }
     this.lastPhase = phase;
 
@@ -223,11 +239,23 @@ export class TongueRenderer {
     if (view && phase === TonguePhase.Windup) {
       this.buildWindup(mouth, forward, smooth(view.time / TONGUE.windup));
     } else if (view && phase === TonguePhase.Extend) {
-      const e = view.time / tongueExtendSeconds(tongueDistance(view.arc));
-      reach = this.buildArc(mouth, view.arc, 0, 1 - (1 - Math.min(e, 1)) ** 3, 1 - Math.min(e, 1));
+      // BEING STEERED: from the mouth along the path laid so far, out to the
+      // tip. It ends on the platform under the tip if one would catch it, and
+      // at the height it left from otherwise - exactly where it would freeze.
+      const path = view.path;
+      const extended = Math.min(path.tongueMax, view.time * tongueExtendSpeed(path.tongueMax));
+      layTonguePath(path, extended, false, this.laid);
+      const tipX = this.laid.xs[this.laid.count - 1] as number;
+      const tipZ = this.laid.zs[this.laid.count - 1] as number;
+      const ground = this.laid.length >= TONGUE.stickMinDistance ? groundProbe(tipX, tipZ, path) : null;
+      const settle = Math.min(1, extended / Math.max(1, path.tongueMax));
+      reach = this.buildPath(mouth, 0, this.laid.length, path.sy, ground ?? path.sy, (1 - settle) * 0.6);
     } else if (view && phase === TonguePhase.Glide) {
-      const u = tongueGlideU(view.time / tongueGlideSeconds(tongueDistance(view.arc)));
-      reach = this.buildArc(mouth, view.arc, u, 1, 0);
+      // FROZEN: the rider is carried along it; the tongue shortens behind them.
+      const path = view.path;
+      layTonguePath(path, 0, true, this.laid);
+      const u = tongueGlideU(view.time / tongueGlideSeconds(this.laid.length));
+      reach = this.buildPath(mouth, u * this.laid.length, this.laid.length, path.sy, path.ey, 0);
     } else if (this.retract >= 0) {
       this.retract += dt;
       const t = Math.min(this.retract / RETRACT_SECONDS, 1);
@@ -287,40 +315,29 @@ export class TongueRenderer {
   }
 
   /**
-   * Along the throw's own curve, from the rider (`from`) to `to`, with the root
-   * pinned to the mouth. `wobble` shakes the tongue as it flies out.
+   * Along the laid path from arc length `from` (the rider) to `to` (the tip),
+   * with the root pinned to the mouth. `wobble` shakes the tongue as it flies.
    *
    * @returns the drawn length, for the particle budget
    */
-  private buildArc(mouth: Vector3, arc: TongueArc, from: number, to: number, wobble: number): number {
-    const mouthLift = mouth.y - this.feetAt(arc, from);
-    tonguePointAt(arc, from, this.point);
-    this.offset.set(mouth.x - this.point.x, mouth.y - this.point.y - mouthLift, mouth.z - this.point.z);
+  private buildPath(mouth: Vector3, from: number, to: number, startY: number, endY: number, wobble: number): number {
+    sampleTonguePath(this.laid, from, startY, endY, this.point);
+    const mouthLift = mouth.y - this.point.y;
+    this.offset.set(mouth.x - this.point.x, 0, mouth.z - this.point.z);
     let length = 0;
     for (let i = 0; i <= SEGMENTS; i += 1) {
       const s = i / SEGMENTS;
-      const v = from + (to - from) * s;
-      tonguePointAt(arc, v, this.point);
-      // The root is at the mouth; the far end is on the ground.
+      sampleTonguePath(this.laid, from + (to - from) * s, startY, endY, this.point);
+      // The root is at the mouth; the far end is where the path ends.
       const lift = mouthLift * (1 - s);
       const pin = 1 - smooth(s * 3);
       const c = this.centers[i] as Vector3;
-      c.set(
-        this.point.x + this.offset.x * pin,
-        this.point.y + lift + this.offset.y * pin,
-        this.point.z + this.offset.z * pin,
-      );
+      c.set(this.point.x + this.offset.x * pin, this.point.y + lift, this.point.z + this.offset.z * pin);
       if (wobble > 0) c.y += Math.sin(s * 9 - this.time * 30) * wobble * 0.7 * s;
       this.scales[i] = 1;
       if (i > 0) length += c.distanceTo(this.centers[i - 1] as Vector3);
     }
     return length;
-  }
-
-  /** The rider's feet height at `u`, for the mouth offset. */
-  private feetAt(arc: TongueArc, u: number): number {
-    tonguePointAt(arc, u, this.point);
-    return this.point.y;
   }
 
   private writeTube(): void {

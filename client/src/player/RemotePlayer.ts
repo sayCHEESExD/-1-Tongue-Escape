@@ -2,11 +2,13 @@ import {
   TONGUE,
   TREADMILLS,
   TonguePhase,
-  tongueDistance,
+  createLaidTonguePath,
+  layTonguePath,
+  sampleTonguePath,
   tongueExtendSeconds,
   tongueGlideSeconds,
   tongueGlideU,
-  tonguePointAt,
+  type TonguePathState,
 } from '@tongue/shared';
 import { DEATH } from '../config/animationConfig.js';
 import { createAnimationInput, type AnimationInput } from '../animation/AnimationInput.js';
@@ -33,9 +35,11 @@ const shortestAngle = (from: number, to: number): number => {
  * Another player's character, rendered from replicated state ONLY.
  *
  * Walking is smoothed toward the replicated transform. A THROW is replayed
- * locally from its replicated arc - the same `tonguePointAt` the simulation
- * rides - so a remote sails along the exact curve, and their tongue is drawn
- * along it, rather than cutting the corners of a 20 Hz stream.
+ * locally from its replicated STEERED PATH: the tongue grows along the headings
+ * the thrower laid (the newest carried on toward the tip between patches),
+ * and once the server freezes the path the remote rides that exact curve -
+ * the same `layTonguePath`/`sampleTonguePath` the simulation rides - rather
+ * than cutting the corners of a 20 Hz stream.
  */
 export class RemotePlayer {
   readonly character: PlayerCharacter;
@@ -54,15 +58,23 @@ export class RemotePlayer {
   private readonly dresser: AvatarDresser;
   private lastLook = '';
 
-  /** The locally replayed throw. */
-  private readonly view: TongueView = {
-    phase: TonguePhase.None,
-    time: 0,
-    arc: { sx: 0, sy: 0, sz: 0, ex: 0, ey: 0, ez: 0 },
-    hit: true,
+  /** The locally replayed throw, and its path copied out of the replicated state. */
+  private readonly path: TonguePathState & { tongueHeadings: number[] } = {
+    sx: 0,
+    sy: 0,
+    sz: 0,
+    ex: 0,
+    ey: 0,
+    ez: 0,
+    tongueYaw0: 0,
+    tongueMax: 0,
+    tongueSeg: 0,
+    tongueHeadings: [],
   };
+  private readonly view: TongueView = { phase: TonguePhase.None, time: 0, path: this.path, hit: true };
   private lastCount = -1;
   private readonly point = { x: 0, y: 0, z: 0 };
+  private readonly laid = createLaidTonguePath();
 
   get position(): { readonly x: number; readonly y: number; readonly z: number } {
     return { x: this.targetX, y: this.targetY, z: this.targetZ };
@@ -112,13 +124,19 @@ export class RemotePlayer {
       if (this.view.phase !== TonguePhase.Glide) this.view.phase = TonguePhase.None;
       return;
     }
-    const arc = this.view.arc;
-    arc.sx = state.tongueSX;
-    arc.sy = state.tongueSY;
-    arc.sz = state.tongueSZ;
-    arc.ex = state.tongueEX;
-    arc.ey = state.tongueEY;
-    arc.ez = state.tongueEZ;
+    const path = this.path;
+    path.sx = state.tongueSX;
+    path.sy = state.tongueSY;
+    path.sz = state.tongueSZ;
+    path.ex = state.tongueEX;
+    path.ey = state.tongueEY;
+    path.ez = state.tongueEZ;
+    path.tongueYaw0 = state.tongueYaw0;
+    path.tongueMax = state.tongueMax;
+    path.tongueSeg = state.tongueSeg;
+    path.tongueHeadings.length = 0;
+    const laid = state.tonguePath;
+    for (let i = 0; i < laid.length; i += 1) path.tongueHeadings.push(laid[i] as number);
     this.view.hit = state.tongueHit;
     if (fresh || this.view.phase !== phase || Math.abs(this.view.time - state.tongueTime) > RESYNC_SECONDS) {
       this.view.phase = phase;
@@ -140,39 +158,38 @@ export class RemotePlayer {
     this.dresser.setLook(look.appearance, look.proportions);
   }
 
-  /** Advance the replayed throw through its phases, exactly as the simulation does. */
+  /**
+   * Advance the replayed throw. The windup and the ride run on the local clock;
+   * the deployment ends only when the SERVER says the path froze, because only
+   * the thrower's steering decides where and when that is.
+   */
   private advanceThrow(dt: number): void {
     const view = this.view;
     if (view.phase === TonguePhase.None) return;
     view.time += dt;
-    const distance = tongueDistance(view.arc);
     if (view.phase === TonguePhase.Windup && view.time >= TONGUE.windup) {
       view.time -= TONGUE.windup;
       view.phase = TonguePhase.Extend;
     }
-    if (view.phase === TonguePhase.Extend) {
-      const extend = tongueExtendSeconds(distance);
-      if (view.time >= extend) {
-        view.time -= extend;
-        view.phase = TonguePhase.Glide;
-      }
-    }
-    if (view.phase === TonguePhase.Glide && view.time >= tongueGlideSeconds(distance)) {
+    if (view.phase === TonguePhase.Glide && view.time >= this.glideSeconds()) {
       view.phase = TonguePhase.None;
       view.time = 0;
     }
   }
 
+  private glideSeconds(): number {
+    return tongueGlideSeconds(layTonguePath(this.path, 0, true, this.laid).length);
+  }
+
   private progress(): number {
     const view = this.view;
-    const distance = tongueDistance(view.arc);
     switch (view.phase) {
       case TonguePhase.Windup:
         return view.time / TONGUE.windup;
       case TonguePhase.Extend:
-        return view.time / tongueExtendSeconds(distance);
+        return view.time / tongueExtendSeconds(this.path.tongueMax);
       case TonguePhase.Glide:
-        return view.time / tongueGlideSeconds(distance);
+        return view.time / this.glideSeconds();
       default:
         return 0;
     }
@@ -185,16 +202,19 @@ export class RemotePlayer {
     const position = this.character.root.position;
 
     if (this.view.phase === TonguePhase.Glide) {
-      // Ride the exact curve.
-      const glide = tongueGlideSeconds(tongueDistance(this.view.arc));
-      tonguePointAt(this.view.arc, tongueGlideU(this.view.time / glide), this.point);
+      // Ride the exact curve the thrower laid, facing along it.
+      layTonguePath(this.path, 0, true, this.laid);
+      const glide = tongueGlideSeconds(this.laid.length);
+      const at = tongueGlideU(this.view.time / glide) * this.laid.length;
+      const px = position.x;
+      const pz = position.z;
+      sampleTonguePath(this.laid, at, this.path.sy, this.path.ey, this.point);
       position.set(this.point.x, this.point.y, this.point.z);
-      const arc = this.view.arc;
-      this.character.setYaw(Math.atan2(arc.ex - arc.sx, arc.ez - arc.sz));
+      if (Math.hypot(this.point.x - px, this.point.z - pz) > 1e-3) this.character.setYaw(Math.atan2(this.point.x - px, this.point.z - pz));
     } else if (this.view.phase !== TonguePhase.None) {
-      const arc = this.view.arc;
-      position.set(arc.sx, arc.sy, arc.sz);
-      this.character.setYaw(Math.atan2(arc.ex - arc.sx, arc.ez - arc.sz));
+      // Rooted while winding up and steering.
+      position.set(this.path.sx, this.path.sy, this.path.sz);
+      this.character.setYaw(this.path.tongueYaw0);
     } else {
       const gap = Math.hypot(this.targetX - position.x, this.targetY - position.y, this.targetZ - position.z);
       if (!this.placed || (gap > SNAP_DISTANCE && !wasThrowing)) {

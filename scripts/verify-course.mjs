@@ -5,7 +5,9 @@
  * landing - at the Tongue Length of their recommended level. Each stage from
  * 2 on is then proven to ASK for that level: its gate throw, made with the
  * Tongue Length of three levels lower, runs out in the air and the rider burns.
- * The targeting rules are exercised directly, and the hub is walked.
+ * Then the STEERING: straight, slight and strong A/D, S, letting go, the ride
+ * following the exact laid curve, steering onto and away from real islands,
+ * nothing in the chosen direction, and islands beyond the tongue. The hub is walked.
  *
  * Run after `npm run build:shared`.
  */
@@ -138,61 +140,158 @@ for (const stage of S.STAGES) {
 }
 pass('every gate throw fails three levels short: the tongue runs out and the rider burns');
 
-console.log('\nTargeting');
+console.log('\nSteering the tongue');
+
+/**
+ * Throw from (x, y, z) facing `yaw` with a tongue of `length`, holding
+ * `steer(step)` = { moveX, moveZ } (camera-relative, the camera facing `yaw`)
+ * every step. Records the rider during the ride.
+ */
+const steerThrow = (x, y, z, yaw, length, steer = () => ({ moveX: 0, moveZ: 0 })) => {
+  const motion = place(x, y, z, yaw);
+  let step = 0;
+  const input = () => {
+    const held = steer(step);
+    return { moveX: held.moveX, moveZ: held.moveZ, tongue: step === 0, cameraYaw: yaw };
+  };
+  const ride = [];
+  let frozen = null;
+  for (; step < 60 * 8; step += 1) {
+    const was = motion.tonguePhase;
+    S.stepPlayer(motion, input(), { length }, DT, collision, events);
+    if (was === S.TonguePhase.Extend && motion.tonguePhase === S.TonguePhase.Glide) {
+      frozen = { headings: [...motion.tongueHeadings], sx: motion.sx, sy: motion.sy, sz: motion.sz, ex: motion.ex, ey: motion.ey, ez: motion.ez, hit: motion.tongueHit, yaw0: motion.tongueYaw0, seg: motion.tongueSeg, max: motion.tongueMax };
+    }
+    if (motion.tonguePhase === S.TonguePhase.Glide) ride.push([motion.x, motion.y, motion.z]);
+    if (step > 1 && motion.tonguePhase === S.TonguePhase.None && frozen) break;
+  }
+  run(motion, { moveX: 0, moveZ: 0, tongue: false, cameraYaw: yaw }, length, 2);
+  return { motion, frozen, ride };
+};
+
+/** The frozen path as the renderer and the rider see it. */
+const laidOf = (f) =>
+  S.layTonguePath(
+    { sx: f.sx, sy: f.sy, sz: f.sz, ex: f.ex, ey: f.ey, ez: f.ez, tongueYaw0: f.yaw0, tongueMax: f.max, tongueSeg: f.seg, tongueHeadings: f.headings },
+    0,
+    true,
+    S.createLaidTonguePath(),
+  );
+
+/** Hold a WORLD direction (radians) with the camera facing `cameraYaw`. */
+const hold = (worldYaw, cameraYaw, amount = 1) => ({ moveX: -Math.sin(worldYaw - cameraYaw) * amount, moveZ: Math.cos(worldYaw - cameraYaw) * amount });
+
+const open = { x: 0, y: S.START_PLATFORM.topY, z: S.START_PLATFORM.minZ + 1 };
 {
-  const stage = S.STAGES[0];
-  const a = stage.islands[0];
-  const b = stage.islands[1];
-  const { sx, sz, yaw } = standAndAim(a, b);
-  const length = S.tongueLengthFor(1);
+  // Over the start platform's open slab, facing down the river, nothing reachable in 12 studs sideways.
+  const L = 12;
+  const straight = steerThrow(open.x, open.y, open.z, 0, L);
+  const f = straight.frozen;
+  const laid = laidOf(f);
+  check(f && f.headings.every((h) => Math.abs(h - 0) < 1e-12), 'straight forward: every segment keeps the initial heading');
+  check(f && !f.hit && Math.abs(laid.length - L) < 1e-9, `straight forward: the path is exactly ${laid.length.toFixed(2)} studs, the Tongue Length`);
 
-  // Off by 15 degrees: the forward cone still finds the island, not the lava.
-  const off = place(sx, a.topY, sz, yaw);
-  const r1 = throwAt(off, yaw + (15 * Math.PI) / 180, length);
-  check(r1.arc.hit && inside(off, b), 'aimed 15 degrees off, the tongue still takes the island ahead');
-
-  // Facing sideways at the river wall: nothing is found by turning; the tongue runs out.
-  const side = place(sx, a.topY, a.z, Math.PI / 2);
-  const r2 = throwAt(side, Math.PI / 2, length);
-  check(!r2.arc.hit, 'facing the wall, it does not turn to find an island');
-
-  // Facing backward toward the start platform: that is behind the route but within the cone, and valid.
-  const back = place(0, a.topY, a.z - a.depth / 2 + 0.9, Math.PI);
-  const r3 = throwAt(back, Math.PI, length);
-  check(r3.arc.hit && Math.abs(back.y - S.START_PLATFORM.topY) < 0.05, 'facing the start platform, it attaches there');
-
-  // The island underfoot is never the target.
-  const middle = place(a.x, a.topY, a.z - a.depth / 2 + 2, 0);
-  const own = { x: 0, y: 0, z: 0, hit: false };
-  collision.findTongueTarget(middle.x, middle.y, middle.z, 0, 8, own);
-  check(!own.hit, 'a short throw along your own island does not stick to it');
+  const slightLeft = steerThrow(open.x, open.y, open.z, 0, L, () => ({ moveX: -0.35, moveZ: 0 })).frozen;
+  const strongLeft = steerThrow(open.x, open.y, open.z, 0, L, () => ({ moveX: -1, moveZ: 0 })).frozen;
+  const slightRight = steerThrow(open.x, open.y, open.z, 0, L, () => ({ moveX: 0.35, moveZ: 0 })).frozen;
+  const strongRight = steerThrow(open.x, open.y, open.z, 0, L, () => ({ moveX: 1, moveZ: 0 })).frozen;
+  const endX = (fr) => laidOf(fr).xs[laidOf(fr).count - 1];
+  // Camera facing +Z: its left (A) is +X, its right (D) is -X.
+  check(endX(slightLeft) > 0.2 && endX(strongLeft) > endX(slightLeft) + 0.2, `A bends the tongue left, harder when held fully (${endX(slightLeft).toFixed(2)} then ${endX(strongLeft).toFixed(2)})`);
+  check(endX(slightRight) < -0.2 && endX(strongRight) < endX(slightRight) - 0.2, `D bends it right, harder when held fully (${endX(slightRight).toFixed(2)} then ${endX(strongRight).toFixed(2)})`);
+  const turnLimit = S.TONGUE.turnPerUnit * strongLeft.seg + 1e-9;
+  const smooth = [strongLeft, strongRight].every((fr) => fr.headings.every((h, i) => Math.abs(h - (i === 0 ? fr.yaw0 : fr.headings[i - 1])) <= turnLimit));
+  check(smooth, `no corners: every segment turns at most ${(S.TONGUE.turnPerUnit * strongLeft.seg * 180 / Math.PI).toFixed(1)} degrees`);
+  check([slightLeft, strongLeft, slightRight, strongRight].every((fr) => Math.abs(laidOf(fr).length - L) < 1e-6), 'steered paths are still exactly the Tongue Length');
 }
 {
-  // Unreachable: find a deck edge where the island ahead is out of a 12-stud
-  // tongue's reach. The tongue must stop at exactly 12, in the air, and the rider burn.
-  const length = 12;
-  let spot = null;
-  const probe = { x: 0, y: 0, z: 0, hit: false };
-  for (const stage of S.STAGES) {
-    const deck = stage.deck;
-    const z = deck.z + deck.depth / 2 - 0.9;
-    if (collision.findTongueTarget(deck.x, deck.topY, z, 0, length, probe) && !probe.hit && S.isOverLava(probe.x, probe.z)) {
-      spot = { x: deck.x, y: deck.topY, z };
-      break;
+  // Steer for the first part only, then let go: the tongue keeps its heading and bends no further.
+  const L = 36;
+  const r = steerThrow(0, S.STAGES[0].deck.topY, S.STAGES[0].deck.z + 11, 0, L, (step) => (step < 30 ? { moveX: -1, moveZ: 0 } : { moveX: 0, moveZ: 0 }));
+  const hs = r.frozen.headings;
+  const bent = hs.findIndex((h) => Math.abs(h) > 0.01);
+  const lastBend = hs.reduce((last, h, i) => (i > 0 && Math.abs(h - hs[i - 1]) > 1e-12 ? i : last), 0);
+  const steady = hs.slice(lastBend).every((h) => h === hs[lastBend]);
+  check(bent >= 0 && steady && lastBend < hs.length - 3, `letting go stops the bend: segments ${lastBend + 1}..${hs.length} keep one heading`);
+}
+{
+  // W and S: holding S turns the tongue around behind.
+  const L = 60;
+  const back = steerThrow(0, S.STAGES[0].deck.topY, S.STAGES[0].deck.z, 0, L, () => ({ moveX: 0, moveZ: -1 })).frozen;
+  const last = back.headings[back.headings.length - 1];
+  check(back && Math.cos(last) < -0.5, `S steers it backward (final heading ${(last * 180 / Math.PI).toFixed(0)} degrees from forward)`);
+}
+{
+  // The rider follows the EXACT frozen curve, to its end.
+  const L = 24;
+  const r = steerThrow(open.x, open.y, open.z, 0, L, () => ({ moveX: -1, moveZ: 0 }));
+  const laid = laidOf(r.frozen);
+  const onPath = r.ride.every(([x, y, z]) => {
+    let best = Infinity;
+    for (let a = 0; a <= laid.length; a += laid.length / 2000) {
+      const p = { x: 0, y: 0, z: 0 };
+      S.sampleTonguePath(laid, a, r.frozen.sy, r.frozen.ey, p);
+      best = Math.min(best, Math.hypot(p.x - x, p.y - y, p.z - z));
+    }
+    return best < 0.05;
+  });
+  check(r.ride.length > 10 && onPath, `the ride follows the curve that was laid (${r.ride.length} ride steps, every one on the path)`);
+}
+
+// Find a real island pair where steering decides the outcome, at its stage's Tongue Length.
+const findCase = (wantSteerLands) => {
+  for (const stage of S.STAGES.slice(1)) {
+    const L = S.tongueLengthFor(stage.recommendedLevel);
+    const route = [...stage.islands, stage.deck];
+    for (let i = 1; i < route.length; i += 1) {
+      const from = route[i - 1];
+      const to = route[i];
+      const { sx, sz, yaw } = standAndAim(from, to);
+      for (const off of [25, -25, 35, -35, 45, -45]) {
+        const aim = yaw + (off * Math.PI) / 180;
+        if (wantSteerLands) {
+          const straight = steerThrow(sx, from.topY, sz, aim, L);
+          if (inside(straight.motion, to)) continue;
+          const steered = steerThrow(sx, from.topY, sz, aim, L, () => hold(yaw, aim));
+          if (inside(steered.motion, to)) return { stage, i, off, straight, steered, to };
+        } else {
+          const straight = steerThrow(sx, from.topY, sz, yaw, L);
+          if (!inside(straight.motion, to)) break;
+          const away = steerThrow(sx, from.topY, sz, yaw, L, () => hold(yaw - Math.sign(off) * Math.PI / 2, yaw));
+          if (!inside(away.motion, to)) return { stage, i, off, straight, away, to };
+        }
+      }
     }
   }
-  const motion = place(spot.x, spot.y, spot.z, 0);
-  const { arc } = throwAt(motion, 0, length);
-  const reached = Math.hypot(arc.ex - arc.sx, arc.ez - arc.sz);
-  check(!arc.hit && Math.abs(reached - length) < 1e-6 && Math.abs(arc.ey - arc.sy) < 1e-6, `with no island in reach the tongue stops at exactly ${length} studs, in the air`);
-  check(collision.hasFallen(motion.x, motion.y, motion.z), 'and the rider drops into the lava');
+  return null;
+};
+{
+  const c = findCase(true);
+  check(c !== null, c ? `steering toward an island: stage ${c.stage.index}, aimed ${c.off} degrees off - unsteered it misses, steered onto it it lands` : 'no island could be reached by steering toward it');
+  const a = findCase(false);
+  check(a !== null && !inside(a.away.motion, a.to), a ? `steering away from an island: stage ${a.stage.index} - aimed at it it lands, steered away it does not` : 'no away case found');
 }
 {
-  // Nothing reachable over a platform: the rider drops onto the platform below the tongue's end.
-  const motion = place(0, 0, -80, 0);
-  const { arc } = throwAt(motion, 0, 12);
-  check(!arc.hit && motion.grounded && Math.abs(motion.y) < 1e-6 && motion.z > -80 + 11, 'in the hub the tongue runs its length and the rider lands on the floor');
+  // No island in the chosen direction: ends in the air at full length (or at the wall), the rider drops and burns.
+  const island = S.STAGES[1].islands[3];
+  const L = S.tongueLengthFor(5);
+  const r = steerThrow(island.x, island.topY, island.z, island.x > 0 ? Math.PI / 2 : -Math.PI / 2, L, () => ({ moveX: 0, moveZ: 0 }));
+  const laid = laidOf(r.frozen);
+  check(!r.frozen.hit && laid.length <= L + 1e-6, `facing the lava with nothing to catch it, the tongue ends in the air after ${laid.length.toFixed(1)} studs (max ${L})`);
+  check(collision.hasFallen(r.motion.x, r.motion.y, r.motion.z), 'and the rider drops into the lava');
 }
+{
+  // An island beyond the tongue: steering at it does not stretch the tongue.
+  const stage = S.STAGES[4];
+  const from = stage.islands[stage.gate - 1];
+  const to = stage.islands[stage.gate];
+  const short = S.tongueLengthFor(stage.recommendedLevel - 3);
+  const { sx, sz, yaw } = standAndAim(from, to);
+  const r = steerThrow(sx, from.topY, sz, yaw, short, () => hold(yaw, yaw));
+  check(!r.frozen.hit && Math.abs(laidOf(r.frozen).length - short) < 1e-6 && !inside(r.motion, to), `an island beyond the tongue stays out of reach: the tongue stops at ${short} studs`);
+}
+
+
 
 console.log('\nThe hub');
 {

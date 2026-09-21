@@ -26,13 +26,19 @@ Do NOT use python from the Bash tool on this machine (Windows Store stub stalls)
   (`client/src/world/WorldTextures.ts`, `client/src/effects/tongueTextures.ts`). Only `assets/` ships as files;
   `scripts/verify-assets.mjs` pins their digests.
 - **Two movement modes only: walking and the tongue. There is NO jump.** Click / Space / the TONGUE touch
-  button all throw. The throw is part of the SHARED sim (`shared/src/sim/PlayerSim.ts`): windup -> extend ->
-  glide along `tonguePointAt` (quadratic Bezier). Targeting (`WorldCollision.findTongueTarget`, server-side):
-  the farthest landable spot within the Tongue Length on a platform OTHER than the one underfoot, straight
-  ahead first, then a forward cone of +-24 degrees (never sideways/behind). None in reach: the tongue flies
-  straight ahead to EXACTLY its length (or the last free point before a wall), ends in the air, the rider
-  races there and drops (keeps 25% of the ride speed). Clients send only "pressed" + yaw.
-- Client prediction replays `stepPlayer` and reconciles EVERY `PlayerMotion` field, tongue state included.
+  button all throw. The throw is part of the SHARED sim (`shared/src/sim/PlayerSim.ts`): windup -> EXTEND
+  (steered) -> GLIDE. During EXTEND the movement input (WASD / joystick, camera-relative) STEERS the tip
+  instead of walking: the path is laid in equal ~2-stud segments, each heading turned toward the held
+  direction by at most `TONGUE.turnPerUnit` rad/unit (no corners; nothing held = straight on). The path
+  freezes when (a) it reaches the Tongue Length exactly, (b) the tip is about to LEAVE a platform it reached
+  (it sticks there), or (c) the next segment would hit a wall / leave the world. It sticks only to
+  platforms the path actually crossed (`WorldCollision.tongueCandidate`, never the one underfoot) - no cone,
+  no magnet. Frozen over nothing: the tongue ends in the air at the start height, the rider rides there and
+  drops (keeps 25% of the ride speed). The GLIDE rides exactly `layTonguePath` + `sampleTonguePath`, the
+  same functions the renderer draws. Replicated: `tongueYaw0/Max/Seg` + `tonguePath` (one heading per
+  segment); clients send only inputs.
+- Client prediction replays `stepPlayer` and reconciles EVERY `PlayerMotion` field, the steered path included.
+  Test harnesses must feed input at real-time pace: the server rejects more than 1.5x real time of input.
   Any new motion field must be added to `PlayerState`, `MovementService.publish`, `AuthoritativeMotion` and
   `LocalPlayer.reconcile`.
 - **XP and Tongue Length are different values.** XP (`xp`, per step) decides the level; the level alone decides

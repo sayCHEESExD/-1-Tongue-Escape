@@ -10,7 +10,8 @@ import {
   horizontalSpeed,
   resetMotion,
   stepPlayer,
-  tongueDistance,
+  createLaidTonguePath,
+  layTonguePath,
   tongueExtendSeconds,
   tongueGlideSeconds,
   type MoveMessage,
@@ -69,6 +70,10 @@ export interface AuthoritativeMotion {
   tongueEX: number;
   tongueEY: number;
   tongueEZ: number;
+  tongueYaw0: number;
+  tongueMax: number;
+  tongueSeg: number;
+  tonguePath: ArrayLike<number>;
 }
 
 /**
@@ -111,12 +116,14 @@ export class LocalPlayer {
   private wasHeld = false;
   private readonly animationInput: AnimationInput = createAnimationInput();
   private readonly plate = new NamePlate();
+  /** The throw as drawn: the predicted motion itself, whose path the player is steering. */
   private readonly view: TongueView = {
     phase: TonguePhase.None,
     time: 0,
-    arc: { sx: 0, sy: 0, sz: 0, ex: 0, ey: 0, ez: 0 },
+    path: this.motion,
     hit: true,
   };
+  private readonly laid = createLaidTonguePath();
 
   /** Edges this frame, for sound and camera. */
   thrownEdge = false;
@@ -267,6 +274,11 @@ export class LocalPlayer {
     m.ex = state.tongueEX;
     m.ey = state.tongueEY;
     m.ez = state.tongueEZ;
+    m.tongueYaw0 = state.tongueYaw0;
+    m.tongueMax = state.tongueMax;
+    m.tongueSeg = state.tongueSeg;
+    m.tongueHeadings.length = 0;
+    for (let i = 0; i < state.tonguePath.length; i += 1) m.tongueHeadings.push(state.tonguePath[i] as number);
 
     let kept = 0;
     for (const entry of this.pending) {
@@ -381,12 +393,6 @@ export class LocalPlayer {
     // The body is drawn a fraction of a step behind the simulation; so is the tongue.
     view.time = Math.max(0, m.tongueTime - FIXED_DT + this.accumulator);
     view.hit = m.tongueHit;
-    view.arc.sx = m.sx;
-    view.arc.sy = m.sy;
-    view.arc.sz = m.sz;
-    view.arc.ex = m.ex;
-    view.arc.ey = m.ey;
-    view.arc.ez = m.ez;
     return view;
   }
 
@@ -401,9 +407,9 @@ export class LocalPlayer {
       case TonguePhase.Windup:
         return m.tongueTime / TONGUE.windup;
       case TonguePhase.Extend:
-        return m.tongueTime / tongueExtendSeconds(tongueDistance(m));
+        return m.tongueTime / tongueExtendSeconds(m.tongueMax);
       case TonguePhase.Glide:
-        return m.tongueTime / tongueGlideSeconds(tongueDistance(m));
+        return m.tongueTime / tongueGlideSeconds(layTonguePath(m, 0, true, this.laid).length);
       default:
         return 0;
     }
