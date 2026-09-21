@@ -13,7 +13,8 @@ Three.js client, authoritative Colyseus server (15 players per room), hosted on 
 | Walk | WASD / arrows | left stick |
 | Look | mouse | drag |
 | Throw tongue | left click or Space | TONGUE button |
-| Steer the tongue while it flies out | WASD / arrows | left stick |
+| Take over and steer the tongue while it deploys: climb / dive | W / S (up / down arrows) | stick up / down |
+| Take over and steer the tongue while it deploys: curve left / right | A / D (left / right arrows) | stick left / right |
 | Trails menu | T | Trails tile |
 | Rebirth menu | R | Rebirth tile |
 | Music | M | Music tile |
@@ -27,6 +28,14 @@ Three.js client, authoritative Colyseus server (15 players per room), hosted on 
   to Futuristic. Walk onto a pad to buy, or to re-equip one you own.
 - **The lava river.** Stage 1 has broad islands for an early tongue. Stage 2 (recommended Level 5) has
   smaller, scattered, higher islands. Win pads pay +1 and +2 Wins.
+- **The tongue.** Click with no keys: the head tilts back and the tongue arcs up and over, coming down
+  on the island ahead that it can reach. That's the default and it's all you need to cross a stage. Press
+  W / A / S / D (or move the stick) while it flies out to take the tip over yourself: W climbs, S dives,
+  A / D curve, freely in 3D, and nothing pulls it back to the ground. It is yours for the rest of that
+  throw. Keys you were already holding when you clicked (walking up to the edge) don't count. When your
+  Tongue Length runs out the tip stops where it is, even high above the lava. You ride the exact curve to
+  that point; if it didn't come down on an island, you drop straight down from there. While the tongue
+  flies out the camera follows its tip from just behind, then eases back for the ride.
 - **Rebirth.** Resets your level for a permanent Tongue multiplier: x1.5, then +0.5 per rebirth.
 - **Trails.** Orange, Blue, Green, Purple and Rainbow multiply Tongue by x1.25 up to x2.5.
 - **Leaderboards.** Top Rebirths, Top Wins and Top Tongue on the spawn's back wall.

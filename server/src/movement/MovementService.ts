@@ -186,6 +186,8 @@ export class MovementService {
     player.tongueTime = m.tongueTime;
     player.tongueHit = m.tongueHit;
     player.tongueLatched = m.tongueLatched;
+    player.tongueDrop = m.tongueDrop;
+    player.tongueControl = m.tongueControl;
     player.tongueCount = m.tongueCount;
     player.tongueSX = m.sx;
     player.tongueSY = m.sy;
@@ -194,6 +196,7 @@ export class MovementService {
     player.tongueEY = m.ey;
     player.tongueEZ = m.ez;
     player.tongueYaw0 = m.tongueYaw0;
+    player.tonguePitch0 = m.tonguePitch0;
     player.tongueMax = m.tongueMax;
     player.tongueSeg = m.tongueSeg;
     // The path only grows during a throw and starts over with the next one.

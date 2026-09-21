@@ -12,7 +12,7 @@ import {
   type StageDefinition,
 } from '../config/course.js';
 import { MOVEMENT } from '../config/movement.js';
-import { TONGUE, tongueClimbFor } from '../config/tongue.js';
+import { TONGUE, tongueArcLength, tongueArcPointAt, tongueArchY, tongueClimbFor } from '../config/tongue.js';
 import { PLAYER_HEIGHT, PLAYER_RADIUS, DEATH_PLANE_Y } from '../constants/world.js';
 
 /**
@@ -36,13 +36,43 @@ export interface CourseTriggers {
   treadmill: number;
 }
 
-/** Where a tongue sticks, written by `tongueCandidate`. */
+/** Where a default throw aims, written by `findTongueTarget`. */
 export interface TongueTarget {
   x: number;
   y: number;
   z: number;
-  /** True when it is a platform to stick to. */
+  /** True when it is a platform to land on; false for a point in the air. */
   hit: boolean;
+}
+
+const ARC_POINT = { x: 0, y: 0, z: 0 };
+const ARC_HIT: TongueHit = { t: 0, nx: 0, ny: 0, nz: 0, kind: 'none', topY: 0, landable: false };
+
+/** The solids underfoot at the start of a throw: never a target. */
+const STANDING: CourseSolid[] = [];
+
+/** The default throw's forward cone, nearest angle first: 0, +6, -6, +12, ... degrees. */
+const CONE_OFFSETS: number[] = (() => {
+  const out = [0];
+  for (let a = TONGUE.coneStepDegrees; a <= TONGUE.coneDegrees + 1e-9; a += TONGUE.coneStepDegrees) {
+    out.push((a * Math.PI) / 180, (-a * Math.PI) / 180);
+  }
+  return out;
+})();
+
+/** What a tongue tip ran into, written by `tongueSegmentHit`. */
+export interface TongueHit {
+  /** Fraction along the segment. */
+  t: number;
+  /** The face's outward normal. */
+  nx: number;
+  ny: number;
+  nz: number;
+  /** A platform's top (land on it), a side or underside (end there and fall), or the lava. */
+  kind: 'none' | 'top' | 'side' | 'under' | 'lava';
+  /** For a solid: its top, and whether it can be stood on. */
+  topY: number;
+  landable: boolean;
 }
 
 export class WorldCollision {
@@ -157,54 +187,241 @@ export class WorldCollision {
   }
 
   /**
-   * CAN THE TONGUE STICK HERE? The platform under a point on a steered path.
+   * WHAT THE TONGUE TIP RUNS INTO flying from p0 to p1 (the feet's path).
    *
-   * A landable solid other than the one the throw started on, whose top is
-   * within the tongue's climb and drop of the start height, and whose edge
-   * the point is inside - or within `TONGUE.captureMargin` of, so grazing an
-   * edge still counts. The landing spot is the point pulled `edgeInset` inside
-   * the edge, with nothing solid over it. This never reaches out for a
-   * platform the path did not cross: it answers for one point only.
+   * The earliest of: entering any solid box (its face tells how: a top, a
+   * side, an underside), reaching the lava's surface over the river, or
+   * leaving the world's walls. Nothing else: open air is open air, and the
+   * tip is never pulled toward the ground or toward an island.
    *
-   * @returns true and the landing spot in `out`, or false
+   * @returns true with the fraction along the segment and the face normal in `out`
    */
-  tongueCandidate(
-    px: number,
-    pz: number,
-    sx: number,
-    sy: number,
-    sz: number,
-    length: number,
-    out: TongueTarget,
+  tongueSegmentHit(
+    x0: number,
+    y0: number,
+    z0: number,
+    x1: number,
+    y1: number,
+    z1: number,
+    out: TongueHit,
   ): boolean {
-    this.collectStanding(sx, sy, sz);
-    const top = sy + tongueClimbFor(length);
-    const bottom = sy - TONGUE.maxDrop;
-    const margin = TONGUE.captureMargin;
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const dz = z1 - z0;
+    let best = Number.POSITIVE_INFINITY;
+    out.kind = 'none';
+
+    for (const solid of this.near((z0 + z1) / 2)) {
+      // Slab test: the parameter range where the segment is inside each slab.
+      let enter = Number.NEGATIVE_INFINITY;
+      let exit = Number.POSITIVE_INFINITY;
+      let axis = -1;
+      let sign = 0;
+      let miss = false;
+      const slabs: readonly (readonly [number, number, number, number])[] = [
+        [x0, dx, solid.minX, solid.maxX],
+        [y0, dy, solid.minY, solid.maxY],
+        [z0, dz, solid.minZ, solid.maxZ],
+      ];
+      for (let k = 0; k < 3; k += 1) {
+        const [p, d, lo, hi] = slabs[k] as readonly [number, number, number, number];
+        if (Math.abs(d) < 1e-12) {
+          if (p <= lo || p >= hi) {
+            miss = true;
+            break;
+          }
+          continue;
+        }
+        let t0 = (lo - p) / d;
+        let t1 = (hi - p) / d;
+        let faceSign = -1;
+        if (t0 > t1) {
+          const swap = t0;
+          t0 = t1;
+          t1 = swap;
+          faceSign = 1;
+        }
+        if (t0 > enter) {
+          enter = t0;
+          axis = k;
+          sign = faceSign;
+        }
+        if (t1 < exit) exit = t1;
+        if (enter >= exit) {
+          miss = true;
+          break;
+        }
+      }
+      if (miss || axis < 0) continue;
+      // Starting on a face and leaving it (the floor underfoot, flying up) is not a hit.
+      if (exit <= 1e-9 || enter > 1) continue;
+      const t = Math.max(0, enter);
+      if (enter < -1e-9 && t === 0) {
+        // Began inside this solid: only a hit if the tip is heading deeper into it.
+        continue;
+      }
+      if (t < best) {
+        best = t;
+        out.t = t;
+        out.nx = axis === 0 ? sign : 0;
+        out.ny = axis === 1 ? sign : 0;
+        out.nz = axis === 2 ? sign : 0;
+        out.kind = axis === 1 && sign > 0 ? 'top' : axis === 1 ? 'under' : 'side';
+        out.topY = solid.maxY;
+        out.landable = solid.landable;
+      }
+    }
+
+    // The lava's surface, over the river.
+    const lava = RIVER.lavaY;
+    if (y0 > lava && y1 <= lava) {
+      const t = (y0 - lava) / (y0 - y1);
+      if (t < best && isOverLava(x0 + dx * t, z0 + dz * t)) {
+        best = t;
+        out.t = t;
+        out.nx = 0;
+        out.ny = 1;
+        out.nz = 0;
+        out.kind = 'lava';
+        out.landable = false;
+      }
+    }
+
+    // The world's walls: stop where the tip would leave the playable space.
+    if (!this.inBounds(x1, z1)) {
+      let lo = 0;
+      let hi = 1;
+      for (let i = 0; i < 20; i += 1) {
+        const mid = (lo + hi) / 2;
+        if (this.inBounds(x0 + dx * mid, z0 + dz * mid)) lo = mid;
+        else hi = mid;
+      }
+      if (lo < best) {
+        best = lo;
+        out.t = lo;
+        const px = x0 + dx * lo;
+        const pz = z0 + dz * lo;
+        const limit = corridorHalfWidthAt(pz);
+        out.nx = px > limit - 0.05 ? -1 : px < -limit + 0.05 ? 1 : 0;
+        out.ny = 0;
+        out.nz = out.nx === 0 ? (dz > 0 ? -1 : 1) : 0;
+        out.kind = 'side';
+        out.landable = false;
+      }
+    }
+    return out.kind !== 'none';
+  }
+
+  /**
+   * The platform a default throw can land on at one column: the highest
+   * LANDABLE solid whose top is in [minY, maxY], that the point is at least
+   * `TONGUE.edgeInset` inside, with nothing solid over the landing spot.
+   */
+  private tongueSolidAt(x: number, z: number, minY: number, maxY: number): CourseSolid | null {
     const inset = TONGUE.edgeInset;
     let best: CourseSolid | null = null;
-    for (const solid of this.near(pz)) {
-      if (!solid.landable || STANDING.indexOf(solid) >= 0) continue;
-      if (solid.maxY < bottom || solid.maxY > top) continue;
-      if (px < solid.minX - margin || px > solid.maxX + margin) continue;
-      if (pz < solid.minZ - margin || pz > solid.maxZ + margin) continue;
-      if (solid.maxX - solid.minX < inset * 2 || solid.maxZ - solid.minZ < inset * 2) continue;
+    for (const solid of this.near(z)) {
+      if (!solid.landable) continue;
+      if (solid.maxY < minY || solid.maxY > maxY) continue;
+      if (x < solid.minX + inset || x > solid.maxX - inset) continue;
+      if (z < solid.minZ + inset || z > solid.maxZ - inset) continue;
       if (best === null || solid.maxY > best.maxY) best = solid;
     }
-    if (best === null) return false;
-    const x = Math.min(Math.max(px, best.minX + inset), best.maxX - inset);
-    const z = Math.min(Math.max(pz, best.minZ + inset), best.maxZ - inset);
-    const y = best.maxY;
-    // Nothing solid - a wall, a console, a higher storey - over the landing.
+    if (best === null) return null;
+    return this.bodyBlocked(x, best.maxY, z) ? null : best;
+  }
+
+  /**
+   * True when the default arc S -> E flies clear of everything until it comes
+   * down on E's surface: traced through the same test the tongue itself uses.
+   */
+  private arcLands(sx: number, sy: number, sz: number, ex: number, ey: number, ez: number, cy: number): boolean {
+    const length = tongueArcLength(sx, sy, sz, ex, ey, ez, cy);
+    const steps = Math.max(4, Math.ceil(length / 0.75));
+    let px = sx;
+    let py = sy;
+    let pz = sz;
+    for (let i = 1; i <= steps + 2; i += 1) {
+      // Two short steps past the end, so the arc meets the surface it comes down on.
+      tongueArcPointAt(sx, sy, sz, ex, ey, ez, cy, (length * i) / steps, ARC_POINT);
+      if (this.tongueSegmentHit(px, py, pz, ARC_POINT.x, ARC_POINT.y, ARC_POINT.z, ARC_HIT)) {
+        if (ARC_HIT.kind !== 'top') return false;
+        const hx = px + (ARC_POINT.x - px) * ARC_HIT.t;
+        const hz = pz + (ARC_POINT.z - pz) * ARC_HIT.t;
+        const hy = py + (ARC_POINT.y - py) * ARC_HIT.t;
+        return Math.abs(hy - ey) < 0.05 && Math.hypot(hx - ex, hz - ez) < 2;
+      }
+      px = ARC_POINT.x;
+      py = ARC_POINT.y;
+      pz = ARC_POINT.z;
+    }
+    return false;
+  }
+
+  /**
+   * WHERE A DEFAULT THROW GOES - the one the player does not steer.
+   *
+   *  1. A reachable island or platform AHEAD: along the aim, the farthest
+   *     landable spot (not on the platform underfoot) that the default arc
+   *     can reach within the Tongue Length.
+   *  2. Failing that, the same a few degrees either side, nearest angle
+   *     first, never beyond `TONGUE.coneDegrees`.
+   *  3. Nothing in reach: a point ahead at the height it left from, as far
+   *     as the natural arc of the full Tongue Length carries (short of the
+   *     walls). The tongue ends in the air there and the rider drops. An
+   *     island just out of reach stays out of reach.
+   *
+   * @returns false only when there is no room at all to throw
+   */
+  findTongueTarget(x: number, y: number, z: number, yaw: number, length: number, out: TongueTarget): boolean {
+    STANDING.length = 0;
     for (const solid of this.near(z)) {
+      if (Math.abs(solid.maxY - y) > 0.05) continue;
       if (x < solid.minX - PLAYER_RADIUS || x > solid.maxX + PLAYER_RADIUS) continue;
       if (z < solid.minZ - PLAYER_RADIUS || z > solid.maxZ + PLAYER_RADIUS) continue;
-      if (solid.maxY > y && solid.minY < y + PLAYER_HEIGHT) return false;
+      STANDING.push(solid);
     }
-    out.x = x;
+    const top = y + tongueClimbFor(length);
+    const bottom = y - TONGUE.maxDrop;
+    const steps = Math.floor((length - TONGUE.minDistance) / TONGUE.sampleStep);
+
+    for (const offset of CONE_OFFSETS) {
+      const angle = yaw + offset;
+      const dirX = Math.sin(angle);
+      const dirZ = Math.cos(angle);
+      for (let i = 0; i <= steps; i += 1) {
+        const d = length - i * TONGUE.sampleStep;
+        const px = x + dirX * d;
+        const pz = z + dirZ * d;
+        if (!this.inBounds(px, pz)) continue;
+        const solid = this.tongueSolidAt(px, pz, bottom, top);
+        if (solid === null || STANDING.indexOf(solid) >= 0) continue;
+        const cy = tongueArchY(x, y, z, px, solid.maxY, pz, length);
+        if (cy === null || !this.arcLands(x, y, z, px, solid.maxY, pz, cy)) continue;
+        out.x = px;
+        out.y = solid.maxY;
+        out.z = pz;
+        out.hit = true;
+        return true;
+      }
+    }
+
+    // Nothing reachable: as far ahead as the natural arc of the full length carries.
+    const dirX = Math.sin(yaw);
+    const dirZ = Math.cos(yaw);
+    let reached = 0;
+    for (let d = TONGUE.sampleStep; d <= length + 1e-9; d += TONGUE.sampleStep) {
+      const px = x + dirX * d;
+      const pz = z + dirZ * d;
+      if (!this.inBounds(px, pz)) break;
+      if (tongueArchY(x, y, z, px, y, pz, length) === null) break;
+      reached = d;
+    }
+    if (reached <= 0) return false;
+    out.x = x + dirX * reached;
     out.y = y;
-    out.z = z;
-    out.hit = true;
+    out.z = z + dirZ * reached;
+    out.hit = false;
     return true;
   }
 
@@ -218,25 +435,12 @@ export class WorldCollision {
     return false;
   }
 
-  /** The solids the feet are standing on, into `STANDING`. Never a tongue's platform. */
-  private collectStanding(x: number, y: number, z: number): void {
-    STANDING.length = 0;
-    for (const solid of this.near(z)) {
-      if (Math.abs(solid.maxY - y) > 0.05) continue;
-      if (x < solid.minX - PLAYER_RADIUS || x > solid.maxX + PLAYER_RADIUS) continue;
-      if (z < solid.minZ - PLAYER_RADIUS || z > solid.maxZ + PLAYER_RADIUS) continue;
-      STANDING.push(solid);
-    }
-  }
-
   stageAt(z: number): StageDefinition | null {
     return stageAt(z);
   }
 }
 
 const SCRATCH: CourseSolid[] = [];
-/** The solids underfoot at the start of a throw: never a target. */
-const STANDING: CourseSolid[] = [];
 const EMPTY: readonly CourseSolid[] = [];
 
 const bucketOf = (z: number): number => Math.floor(z / BUCKET_SIZE);

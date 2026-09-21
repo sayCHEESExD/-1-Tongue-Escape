@@ -44,6 +44,8 @@ export class PlayerState extends Schema {
   @type('float32') tongueTime = 0;
   @type('boolean') tongueHit = false;
   @type('boolean') tongueLatched = false;
+  @type('boolean') tongueDrop = false;
+  @type('uint8') tongueControl = 0;
   @type('uint32') tongueCount = 0;
   @type('float32') tongueSX = 0;
   @type('float32') tongueSY = 0;
@@ -52,11 +54,13 @@ export class PlayerState extends Schema {
   @type('float32') tongueEY = 0;
   @type('float32') tongueEZ = 0;
   /**
-   * THE STEERED PATH the player is laying (or has laid): its first heading, the
-   * Tongue Length it was thrown with, its segment length, and one heading per
-   * segment. It only grows during a throw, so a patch carries the new segments.
+   * THE FLOWN 3D PATH the player is laying (or has laid): its launch heading and
+   * pitch, the Tongue Length it was thrown with, its segment length, and a
+   * (heading, pitch) pair per segment. It only grows during a throw, so a patch
+   * carries just the new segments.
    */
   @type('float32') tongueYaw0 = 0;
+  @type('float32') tonguePitch0 = 0;
   @type('float32') tongueMax = 0;
   @type('float32') tongueSeg = 0;
   @type(['float32']) tonguePath = new ArraySchema<number>();

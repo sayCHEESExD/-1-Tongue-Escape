@@ -2,12 +2,14 @@ import {
   SPAWN_POSITION,
   STAGES,
   TonguePhase,
+  TongueControl,
   canRebirth,
   formatWins,
   type NoticeMessage,
   type RespawnMessage,
   type StageAwardedMessage,
 } from '@tongue/shared';
+import { Vector3 } from 'three';
 import { AudioManager } from '../audio/AudioManager.js';
 import { PlayerAudio } from '../audio/PlayerAudio.js';
 import { Bloxity } from '../bloxity/Bloxity.js';
@@ -38,7 +40,6 @@ import { ICONS } from '../ui/hudStyles.js';
 import { injectTongueStyles } from '../ui/tongueStyles.js';
 import { logger } from '../util/logger.js';
 import { CourseWorld } from '../world/CourseWorld.js';
-import { setTongueGroundProbe } from '../effects/TongueRenderer.js';
 
 const SCOPE = 'Game';
 
@@ -61,6 +62,10 @@ const isTyping = (target: EventTarget | null): boolean => {
  * Composition root. Owns every subsystem and the per-frame order - input,
  * prediction, triggers, camera, network, render - and no gameplay rules.
  */
+/** Scratch for the tongue tip the camera leans toward. */
+const TIP = new Vector3();
+const TIP_DIR = new Vector3();
+
 export class Game {
   private readonly renderer: RendererManager;
   private readonly sceneManager = new SceneManager();
@@ -278,11 +283,6 @@ export class Game {
 
   async initialise(): Promise<PlayerModelReport> {
     this.world.addTo(this.sceneManager.scene);
-    // A tongue being steered is drawn ending where the simulation would freeze it.
-    const landing = { x: 0, y: 0, z: 0, hit: false };
-    setTongueGroundProbe((x, z, path) =>
-      this.world.collision.tongueCandidate(x, z, path.sx, path.sy, path.sz, path.tongueMax, landing) ? landing.y : null,
-    );
     const report = await playerModelLoader.load();
 
     this.localPlayer = new LocalPlayer(this.world.collision);
@@ -335,6 +335,8 @@ export class Game {
 
       this.snapCameraIfPlaced();
       this.camera.setTarget(player.position);
+      // While the tongue deploys, the camera aims along it from just behind the tip.
+      this.camera.setTongueAim(player.tongueAim(TIP, TIP_DIR) ? TIP : null, TIP_DIR);
       this.world.winTrophies.follow(player.position);
       this.sceneManager.followShadow(player.position.x, player.position.y, player.position.z);
       this.flushInput();
@@ -371,7 +373,14 @@ export class Game {
     // The next stage ahead that asks for more tongue than this player has.
     const ahead = STAGES.find((stage) => z > stage.startZ - 30 && z < stage.startZ + 10 && state.level < stage.recommendedLevel);
     let text = '';
-    if (canRebirth(state.level, state.rebirths)) {
+    if (player.tonguePhase === TonguePhase.Windup || player.tonguePhase === TonguePhase.Extend) {
+      const touch = document.body.classList.contains('aoe-touch-mode');
+      if (player.tongueControl === TongueControl.Player) {
+        text = touch ? 'Steering: stick up to climb, down to dive, sideways to curve' : 'Steering: W climb, S dive, A / D curve';
+      } else {
+        text = touch ? 'Move the stick to steer the tongue yourself' : 'Press W A S D to steer the tongue yourself';
+      }
+    } else if (canRebirth(state.level, state.rebirths)) {
       text = 'You can Rebirth! Open the Rebirth menu (R)';
     } else if (state.bestStage === 0 && state.wins === 0 && z < 0) {
       text = document.body.classList.contains('aoe-touch-mode')
@@ -453,6 +462,8 @@ export class Game {
         tongueTime: state.tongueTime,
         tongueHit: state.tongueHit,
         tongueLatched: state.tongueLatched,
+        tongueDrop: state.tongueDrop,
+        tongueControl: state.tongueControl,
         tongueCount: state.tongueCount,
         tongueSX: state.tongueSX,
         tongueSY: state.tongueSY,
@@ -461,6 +472,7 @@ export class Game {
         tongueEY: state.tongueEY,
         tongueEZ: state.tongueEZ,
         tongueYaw0: state.tongueYaw0,
+        tonguePitch0: state.tonguePitch0,
         tongueMax: state.tongueMax,
         tongueSeg: state.tongueSeg,
         tonguePath: state.tonguePath,

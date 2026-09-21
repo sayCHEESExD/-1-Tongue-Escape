@@ -37,6 +37,8 @@ export interface NetPlayerState extends PlayerMotionState {
   velocityZ: number;
   lastInputSeq: number;
   tongueLatched: boolean;
+  tongueDrop: boolean;
+  tongueControl: number;
   ready: boolean;
 
   avatar: AvatarAppearance & AvatarProportions;

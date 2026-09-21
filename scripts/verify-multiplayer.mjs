@@ -1,8 +1,9 @@
 /**
  * Two real clients against a running server: one walks to the river and
- * throws its tongue across to the first island, the other WATCHES - and must
- * see the whole throw replicated (windup, extend, glide) and the thrower land
- * where the server says. Then the forgeries: a client that claims a win pad it
+ * throws its tongue across to the first island, steering it, the other WATCHES
+ * - and must see the whole throw replicated (windup, extend, glide, the
+ * take-over, the exact path) and the thrower land where the server says. Then
+ * a default throw (no keys) must stay automatic and attach to island 2. Then the forgeries: a client that claims a win pad it
  * is nowhere near, or a tongue it cannot afford, is refused.
  *
  * Needs a running server (`npm run dev`), default ws://localhost:2586.
@@ -57,9 +58,13 @@ check(before.z > S.START_PLATFORM.minZ && Math.abs(before.y - S.START_PLATFORM.t
 
 // Watch every phase the watcher sees.
 const phases = new Set();
+const controls = new Set();
 const watch = setInterval(() => {
   const p = seen();
-  if (p) phases.add(p.tonguePhase);
+  if (p) {
+    phases.add(p.tonguePhase);
+    if (p.tonguePhase === S.TonguePhase.Extend) controls.add(p.tongueControl);
+  }
 }, 10);
 
 const countBefore = seen().tongueCount;
@@ -76,12 +81,36 @@ const after = self();
 const island = S.STAGES[0].islands[0];
 check(seen().tongueCount === countBefore + 1, 'the watcher saw one new throw');
 check(phases.has(S.TonguePhase.Windup) && phases.has(S.TonguePhase.Extend) && phases.has(S.TonguePhase.Glide), `the watcher saw windup, extend and glide (${[...phases].sort().join(',')})`);
-check(seen().tongueHit === true, 'the throw attached to ground');
-check(thrownPath.length > 2 && JSON.stringify(thrownPath) === JSON.stringify(watchedPath), `the watcher received the same steered path (${watchedPath.length} segments)`);
-check(new Set(thrownPath.map((h) => h.toFixed(4))).size > 1, 'and it is bent by the steering, not straight');
+check(controls.has(S.TongueControl.Player), 'the watcher saw the key press hand the tongue to the player');
+check(thrownPath.length > 2 && JSON.stringify(thrownPath) === JSON.stringify(watchedPath), `the watcher received the same steered path (${watchedPath.length / 2} segments)`);
+const headings = thrownPath.filter((_, i) => i % 2 === 0);
+check(new Set(headings.slice(-3).map((h) => h.toFixed(4))).size > 1, 'and it is bent by the steering, not straight');
 check(Math.abs(after.y - island.topY) < 0.01 && Math.abs(after.z - island.z) < island.depth / 2, `the thrower landed on island 1 (y ${after.y.toFixed(2)}, z ${after.z.toFixed(1)})`);
 check(Math.abs(seen().z - after.z) < 0.01, 'the watcher agrees on where they landed');
 check(after.deathCount === before.deathCount, 'nobody burned');
+
+// A DEFAULT throw (no keys) from the far edge of island 1: the curved arc attaches to island 2.
+{
+  const island2 = S.STAGES[0].islands[1];
+  for (let i = 0; i < 60 && self().z < island.z + island.depth / 2 - 1.5; i += 1) await drive({ moveZ: 0.5 }, 0.1);
+  await drive({}, 0.5);
+  await sleep(300);
+  controls.clear();
+  const watch2 = setInterval(() => {
+    const p = seen();
+    if (p && p.tonguePhase === S.TonguePhase.Extend) controls.add(p.tongueControl);
+  }, 10);
+  const count = seen().tongueCount;
+  await drive({ tongue: true }, 1 / 60);
+  await drive({}, 3);
+  await sleep(400);
+  clearInterval(watch2);
+  const landed = self();
+  check(seen().tongueCount === count + 1 && [...controls].every((c) => c === S.TongueControl.Auto), 'a throw with no keys stays the default arc, as the watcher sees it');
+  check(seen().tongueHit === true, 'the default throw attached to the ground');
+  check(Math.abs(landed.y - island2.topY) < 0.01 && Math.abs(landed.z - island2.z) < island2.depth / 2 + 0.9, `and the thrower landed on island 2 (y ${landed.y.toFixed(2)}, z ${landed.z.toFixed(1)})`);
+  check(Math.abs(seen().z - landed.z) < 0.01 && landed.deathCount === before.deathCount, 'the watcher agrees, and nobody burned');
+}
 
 // Forgeries.
 const wins = after.wins;

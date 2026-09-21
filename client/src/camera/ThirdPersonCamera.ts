@@ -15,7 +15,32 @@ const RESPAWN_ZOOM_DISTANCE = 10;
 /** How fast that extra distance is given up. Higher is snappier. */
 const RESPAWN_ZOOM_RATE = 6.5;
 
+/**
+ * THE AIMING CAMERA, while the tongue deploys: a close chase shot on the
+ * tongue TIP - the thing being aimed - from a fixed distance behind and a
+ * little above it, facing the way the tip is travelling, so it stays near the
+ * centre of the screen and the islands it is heading for are in view. The
+ * distance never grows with the tongue: a long tongue is still easy to steer.
+ */
+const AIM_DISTANCE = 7.5;
+const AIM_HEIGHT = 3.4;
+/**
+ * The aiming shot takes over as the tip travels out, fully once it is this far
+ * from the player: until then the camera is still the normal one, so it never
+ * ends up inside the player's own head.
+ */
+const AIM_TAKEOVER_DISTANCE = 9;
+/** How far ahead of the tip the camera looks, so its direction reads. */
+const AIM_LEAD = 2.5;
+/** How fast the camera turns to follow the tip's heading. */
+const AIM_TURN_RATE = 7;
+/** How fast the aiming shot eases in on a throw, and back out to the normal view after. */
+const AIM_IN_RATE = 6;
+const AIM_OUT_RATE = 3.2;
+
 const FORWARD = new Vector3();
+const AIM_POSITION = new Vector3();
+const AIM_LOOK = new Vector3();
 const LOOK_TARGET = new Vector3();
 const OFFSET = new Vector3();
 
@@ -69,6 +94,15 @@ export class ThirdPersonCamera {
 
   private aspect = 1;
 
+  /** The tongue tip and its direction of travel while deploying. */
+  private readonly tip = new Vector3();
+  private readonly tipDir = new Vector3(0, 0, 1);
+  private aiming = false;
+  /** Eased 0..1: how much of the shot is the aiming camera. */
+  private aimWeight = 0;
+  /** The heading the aiming camera faces, eased toward the tip's. */
+  private aimYaw = 0;
+
   constructor() {
     this.camera = new PerspectiveCamera(CAMERA.fov, 1, CAMERA.near, CAMERA.far);
     this.camera.position.set(0, CAMERA.height, -CAMERA.distance);
@@ -107,6 +141,18 @@ export class ThirdPersonCamera {
     this.followed.copy(position);
     this.initialised = true;
     this.zoomOffset = zoomIn ? RESPAWN_ZOOM_DISTANCE : 0;
+  }
+
+  /**
+   * While the tongue deploys, pass its tip and direction of travel: the camera
+   * eases in to a close shot on the tip and follows it. Pass null once the
+   * tongue has frozen, and it eases back to the normal view.
+   */
+  setTongueAim(tip: Vector3 | null, direction?: Vector3): void {
+    if (tip && !this.aiming && this.aimWeight === 0) this.aimYaw = this.orbitYaw;
+    this.aiming = tip !== null;
+    if (tip) this.tip.copy(tip);
+    if (direction && direction.lengthSq() > 1e-8) this.tipDir.copy(direction).normalize();
   }
 
   /** Aim the orbit. Called every frame from the look source. */
@@ -191,6 +237,34 @@ export class ThirdPersonCamera {
       .add(OFFSET.set(0, CAMERA.height + sinPitch * distance, 0));
 
     LOOK_TARGET.copy(this.followed).add(OFFSET.set(0, CAMERA.lookAtHeight, 0));
+
+    // The aiming shot on the tongue tip, blended in and out.
+    this.aimWeight += ((this.aiming ? 1 : 0) - this.aimWeight) * (1 - Math.exp(-(this.aiming ? AIM_IN_RATE : AIM_OUT_RATE) * delta));
+    if (!this.aiming && this.aimWeight < 0.002) this.aimWeight = 0;
+    if (this.aimWeight > 0) {
+      const flat = Math.hypot(this.tipDir.x, this.tipDir.z);
+      if (this.aiming && flat > 0.05) {
+        const want = Math.atan2(this.tipDir.x, this.tipDir.z);
+        let turn = want - this.aimYaw;
+        turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+        this.aimYaw += turn * (1 - Math.exp(-AIM_TURN_RATE * delta));
+      }
+      const back = FORWARD.set(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
+      AIM_POSITION.copy(this.tip).addScaledVector(back, -AIM_DISTANCE);
+      AIM_POSITION.y += AIM_HEIGHT;
+      // Look just ahead of the tip - mostly sideways, barely up or down - so the
+      // tip itself stays near the centre however steeply it climbs or dives.
+      AIM_LOOK.set(
+        this.tip.x + this.tipDir.x * AIM_LEAD,
+        this.tip.y + this.tipDir.y * AIM_LEAD * 0.3 + 0.4,
+        this.tip.z + this.tipDir.z * AIM_LEAD,
+      );
+      const out = Math.min(1, this.tip.distanceTo(this.target) / AIM_TAKEOVER_DISTANCE);
+      const eased = this.aimWeight * (out * out * (3 - 2 * out));
+      const w = eased * eased * (3 - 2 * eased);
+      this.camera.position.lerp(AIM_POSITION, w);
+      LOOK_TARGET.lerp(AIM_LOOK, w);
+    }
     this.camera.lookAt(LOOK_TARGET);
   }
 }

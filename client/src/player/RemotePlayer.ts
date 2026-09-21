@@ -67,6 +67,7 @@ export class RemotePlayer {
     ey: 0,
     ez: 0,
     tongueYaw0: 0,
+    tonguePitch0: 0,
     tongueMax: 0,
     tongueSeg: 0,
     tongueHeadings: [],
@@ -132,6 +133,7 @@ export class RemotePlayer {
     path.ey = state.tongueEY;
     path.ez = state.tongueEZ;
     path.tongueYaw0 = state.tongueYaw0;
+    path.tonguePitch0 = state.tonguePitch0;
     path.tongueMax = state.tongueMax;
     path.tongueSeg = state.tongueSeg;
     path.tongueHeadings.length = 0;
@@ -208,7 +210,7 @@ export class RemotePlayer {
       const at = tongueGlideU(this.view.time / glide) * this.laid.length;
       const px = position.x;
       const pz = position.z;
-      sampleTonguePath(this.laid, at, this.path.sy, this.path.ey, this.point);
+      sampleTonguePath(this.laid, at, this.point);
       position.set(this.point.x, this.point.y, this.point.z);
       if (Math.hypot(this.point.x - px, this.point.z - pz) > 1e-3) this.character.setYaw(Math.atan2(this.point.x - px, this.point.z - pz));
     } else if (this.view.phase !== TonguePhase.None) {

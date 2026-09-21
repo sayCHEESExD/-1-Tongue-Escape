@@ -27,16 +27,25 @@ Do NOT use python from the Bash tool on this machine (Windows Store stub stalls)
   `scripts/verify-assets.mjs` pins their digests.
 - **Two movement modes only: walking and the tongue. There is NO jump.** Click / Space / the TONGUE touch
   button all throw. The throw is part of the SHARED sim (`shared/src/sim/PlayerSim.ts`): windup -> EXTEND
-  (steered) -> GLIDE. During EXTEND the movement input (WASD / joystick, camera-relative) STEERS the tip
-  instead of walking: the path is laid in equal ~2-stud segments, each heading turned toward the held
-  direction by at most `TONGUE.turnPerUnit` rad/unit (no corners; nothing held = straight on). The path
-  freezes when (a) it reaches the Tongue Length exactly, (b) the tip is about to LEAVE a platform it reached
-  (it sticks there), or (c) the next segment would hit a wall / leave the world. It sticks only to
-  platforms the path actually crossed (`WorldCollision.tongueCandidate`, never the one underfoot) - no cone,
-  no magnet. Frozen over nothing: the tongue ends in the air at the start height, the rider rides there and
-  drops (keeps 25% of the ride speed). The GLIDE rides exactly `layTonguePath` + `sampleTonguePath`, the
-  same functions the renderer draws. Replicated: `tongueYaw0/Max/Seg` + `tonguePath` (one heading per
-  segment); clients send only inputs.
+  -> GLIDE, with TWO ways to fly the EXTEND (`motion.tongueControl`, `TongueControl`):
+  - **Default (Auto)**: at the press `WorldCollision.findTongueTarget` picks the original target - the farthest
+    landable spot ahead (forward cone +-24 deg, never the platform underfoot) whose curved arc fits the
+    Tongue Length AND flies clear until it comes down on that spot (`arcLands`). The arc is the original
+    quadratic Bezier (`tongueArchY`: natural arch, flattened only to fit). Nothing reachable: a flat arc
+    of the full length ahead, ending in the air. The aim point lives in (ex, ey, ez) until the freeze;
+    segments head for `tongueArcPointAt` one segment further on.
+  - **Player**: FRESH movement input (deadzone `steerDeadzone`) takes over for the rest of the throw. Keys
+    held at the press (`AutoHeld`) only count after being released once. A/D turn, W/S pitch (clamped
+    +-`maxPitch`), at most `turnPerUnit` rad/unit per ~2-stud segment. Letting go flies straight on; the
+    tongue is never pulled back to the ground.
+  The path freezes when the Tongue Length is spent (tip stays WHEREVER it is) or a segment hits something
+  (`tongueSegmentHit`): top -> land; side within `MOVEMENT.stepHeight` of the top -> land on top; other side /
+  underside / lava / wall -> end there. The GLIDE rides exactly `layTonguePath` + `sampleTonguePath` and ends
+  EXACTLY at the endpoint. Not on a top: `tongueDrop` -> straight fall, no carry, no air steering until
+  landing (keeps gates honest: reach can never exceed the Tongue Length). Replicated: `tongueYaw0/Pitch0/Max/Seg`,
+  `tongueControl`, `tongueDrop`, `tonguePath` ((heading, pitch) per segment); clients send only inputs.
+  Client camera: `ThirdPersonCamera.setTongueAim` - a close chase shot at a FIXED distance behind the tip
+  while deploying (never zooms out), blended in as the tip leaves the player, eased back after the freeze.
 - Client prediction replays `stepPlayer` and reconciles EVERY `PlayerMotion` field, the steered path included.
   Test harnesses must feed input at real-time pace: the server rejects more than 1.5x real time of input.
   Any new motion field must be added to `PlayerState`, `MovementService.publish`, `AuthoritativeMotion` and
@@ -54,8 +63,10 @@ Do NOT use python from the Bash tool on this machine (Windows Store stub stalls)
 - **30 stages**, generated deterministically in `shared/src/config/course.ts` from `STAGE_PLANS` (name +
   pattern). Stage k recommends Level 0, 5, 6, 7 ... (`recommendedLevelFor`); every throw fits that level's
   Tongue Length minus 2, and each stage's GATE throw needs one stud less than that - out of reach three levels
-  lower. After ANY course edit run `npm run verify:course`: it crosses all 30 stages with real throws and
-  proves every gate. Stage dressing (turf, props, trees, gateways, lazy signs) is client-only:
+  lower. After ANY course or tongue edit run `npm run verify:course` (~5 min): it crosses all 30 stages with
+  DEFAULT throws only (no keys), checks default throws 5 and 20 levels over never burn, and proves neither
+  the default throw nor any steering (every key, taken over at every segment) reaches a gate three levels short.
+  Stage dressing (turf, props, trees, gateways, lazy signs) is client-only:
   `client/src/config/stageThemes.ts` + `client/src/world/StageDecor.ts` (merge only non-indexed geometry).
 - No checkpoints: any death returns to spawn; a win pad banks Wins and returns to spawn.
 - **One surface style.** Every stylised mesh uses the spawn stud plate: `worldTextures.stud(color)`

@@ -44,6 +44,12 @@ const RETRACT_SECONDS = 0.2;
 
 const UP = new Vector3(0, 1, 0);
 
+/** Smoothstep on [0, 1], clamped. */
+const smooth = (v: number): number => {
+  const t = Math.min(1, Math.max(0, v));
+  return t * t * (3 - 2 * t);
+};
+
 /** What a throw looks like right now, from the prediction or the replicated state. */
 export interface TongueView {
   phase: TonguePhase;
@@ -53,22 +59,6 @@ export interface TongueView {
   path: TonguePathState;
   hit: boolean;
 }
-
-/**
- * Where a platform would catch the tongue under a point, or null. Set once by
- * the game from the course's collision, so a tongue still being steered is
- * drawn ending exactly where the simulation would freeze it.
- */
-export type TongueGroundProbe = (x: number, z: number, path: TonguePathState) => number | null;
-let groundProbe: TongueGroundProbe = () => null;
-export const setTongueGroundProbe = (probe: TongueGroundProbe): void => {
-  groundProbe = probe;
-};
-
-const smooth = (t: number): number => {
-  const c = t < 0 ? 0 : t > 1 ? 1 : t;
-  return c * c * (3 - 2 * c);
-};
 
 /**
  * THE TONGUE: the game's identity, drawn.
@@ -239,23 +229,19 @@ export class TongueRenderer {
     if (view && phase === TonguePhase.Windup) {
       this.buildWindup(mouth, forward, smooth(view.time / TONGUE.windup));
     } else if (view && phase === TonguePhase.Extend) {
-      // BEING STEERED: from the mouth along the path laid so far, out to the
-      // tip. It ends on the platform under the tip if one would catch it, and
-      // at the height it left from otherwise - exactly where it would freeze.
+      // BEING FLOWN: from the mouth along the 3D path laid so far, out to the
+      // tip, wherever in the air it is. Nothing pulls it to the ground.
       const path = view.path;
       const extended = Math.min(path.tongueMax, view.time * tongueExtendSpeed(path.tongueMax));
       layTonguePath(path, extended, false, this.laid);
-      const tipX = this.laid.xs[this.laid.count - 1] as number;
-      const tipZ = this.laid.zs[this.laid.count - 1] as number;
-      const ground = this.laid.length >= TONGUE.stickMinDistance ? groundProbe(tipX, tipZ, path) : null;
       const settle = Math.min(1, extended / Math.max(1, path.tongueMax));
-      reach = this.buildPath(mouth, 0, this.laid.length, path.sy, ground ?? path.sy, (1 - settle) * 0.6);
+      reach = this.buildPath(mouth, 0, this.laid.length, (1 - settle) * 0.6);
     } else if (view && phase === TonguePhase.Glide) {
       // FROZEN: the rider is carried along it; the tongue shortens behind them.
       const path = view.path;
       layTonguePath(path, 0, true, this.laid);
       const u = tongueGlideU(view.time / tongueGlideSeconds(this.laid.length));
-      reach = this.buildPath(mouth, u * this.laid.length, this.laid.length, path.sy, path.ey, 0);
+      reach = this.buildPath(mouth, u * this.laid.length, this.laid.length, 0);
     } else if (this.retract >= 0) {
       this.retract += dt;
       const t = Math.min(this.retract / RETRACT_SECONDS, 1);
@@ -320,19 +306,17 @@ export class TongueRenderer {
    *
    * @returns the drawn length, for the particle budget
    */
-  private buildPath(mouth: Vector3, from: number, to: number, startY: number, endY: number, wobble: number): number {
-    sampleTonguePath(this.laid, from, startY, endY, this.point);
-    const mouthLift = mouth.y - this.point.y;
-    this.offset.set(mouth.x - this.point.x, 0, mouth.z - this.point.z);
+  private buildPath(mouth: Vector3, from: number, to: number, wobble: number): number {
+    sampleTonguePath(this.laid, from, this.point);
+    this.offset.set(mouth.x - this.point.x, mouth.y - this.point.y, mouth.z - this.point.z);
     let length = 0;
     for (let i = 0; i <= SEGMENTS; i += 1) {
       const s = i / SEGMENTS;
-      sampleTonguePath(this.laid, from + (to - from) * s, startY, endY, this.point);
-      // The root is at the mouth; the far end is where the path ends.
-      const lift = mouthLift * (1 - s);
+      sampleTonguePath(this.laid, from + (to - from) * s, this.point);
+      // The root is at the mouth; the rest follows the flown 3D path exactly.
       const pin = 1 - smooth(s * 3);
       const c = this.centers[i] as Vector3;
-      c.set(this.point.x + this.offset.x * pin, this.point.y + lift, this.point.z + this.offset.z * pin);
+      c.set(this.point.x + this.offset.x * pin, this.point.y + this.offset.y * pin, this.point.z + this.offset.z * pin);
       if (wobble > 0) c.y += Math.sin(s * 9 - this.time * 30) * wobble * 0.7 * s;
       this.scales[i] = 1;
       if (i > 0) length += c.distanceTo(this.centers[i - 1] as Vector3);

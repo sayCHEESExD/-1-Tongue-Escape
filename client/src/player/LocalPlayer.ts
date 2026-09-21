@@ -13,6 +13,8 @@ import {
   createLaidTonguePath,
   layTonguePath,
   tongueExtendSeconds,
+  tongueExtendSpeed,
+  tongueDirection,
   tongueGlideSeconds,
   type MoveMessage,
   type MovementInput,
@@ -28,6 +30,7 @@ import { NamePlate } from './NamePlate.js';
 import { PlayerCharacter } from './PlayerCharacter.js';
 
 const MAX_PENDING_INPUTS = 240;
+const AIM_DIR = { x: 0, y: 0, z: 1 };
 const FIXED_DT = 1 / 60;
 const MAX_STEPS_PER_FRAME = 5;
 const ARRIVE_DURATION = 0.16;
@@ -63,6 +66,8 @@ export interface AuthoritativeMotion {
   tongueTime: number;
   tongueHit: boolean;
   tongueLatched: boolean;
+  tongueDrop: boolean;
+  tongueControl: number;
   tongueCount: number;
   tongueSX: number;
   tongueSY: number;
@@ -71,6 +76,7 @@ export interface AuthoritativeMotion {
   tongueEY: number;
   tongueEZ: number;
   tongueYaw0: number;
+  tonguePitch0: number;
   tongueMax: number;
   tongueSeg: number;
   tonguePath: ArrayLike<number>;
@@ -267,6 +273,8 @@ export class LocalPlayer {
     m.tongueTime = state.tongueTime;
     m.tongueHit = state.tongueHit;
     m.tongueLatched = state.tongueLatched;
+    m.tongueDrop = state.tongueDrop;
+    m.tongueControl = state.tongueControl;
     m.tongueCount = state.tongueCount;
     m.sx = state.tongueSX;
     m.sy = state.tongueSY;
@@ -275,6 +283,7 @@ export class LocalPlayer {
     m.ey = state.tongueEY;
     m.ez = state.tongueEZ;
     m.tongueYaw0 = state.tongueYaw0;
+    m.tonguePitch0 = state.tonguePitch0;
     m.tongueMax = state.tongueMax;
     m.tongueSeg = state.tongueSeg;
     m.tongueHeadings.length = 0;
@@ -394,6 +403,35 @@ export class LocalPlayer {
     view.time = Math.max(0, m.tongueTime - FIXED_DT + this.accumulator);
     view.hit = m.tongueHit;
     return view;
+  }
+
+  /**
+   * Where the tongue tip is while the tongue deploys (windup and extend), and
+   * which way it is travelling, for the aiming camera. False at any other time.
+   */
+  tongueAim(position: Vector3, direction: Vector3): boolean {
+    const m = this.motion;
+    if (m.tonguePhase !== TonguePhase.Windup && m.tonguePhase !== TonguePhase.Extend) return false;
+    const pairs = m.tongueHeadings.length;
+    const heading = pairs >= 2 ? (m.tongueHeadings[pairs - 2] as number) : m.tongueYaw0;
+    const pitch = pairs >= 2 ? (m.tongueHeadings[pairs - 1] as number) : m.tonguePitch0;
+    tongueDirection(heading, pitch, AIM_DIR);
+    direction.set(AIM_DIR.x, AIM_DIR.y, AIM_DIR.z);
+    if (m.tonguePhase === TonguePhase.Windup) {
+      position.set(m.sx, m.sy, m.sz);
+      return true;
+    }
+    const time = Math.max(0, m.tongueTime - FIXED_DT + this.accumulator);
+    const extended = Math.min(m.tongueMax, time * tongueExtendSpeed(m.tongueMax));
+    const laid = layTonguePath(m, extended, false, this.laid);
+    const last = laid.count - 1;
+    position.set(laid.xs[last] as number, laid.ys[last] as number, laid.zs[last] as number);
+    return true;
+  }
+
+  /** Who is flying the tongue this throw: `TongueControl` (the default arc, or the player). */
+  get tongueControl(): number {
+    return this.motion.tongueControl;
   }
 
   /** The speed the FEET move at: the belt's, on a treadmill. */

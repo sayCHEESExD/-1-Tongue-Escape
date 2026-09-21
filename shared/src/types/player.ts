@@ -40,8 +40,9 @@ export interface PlayerMotionState {
   tongueEX: number;
   tongueEY: number;
   tongueEZ: number;
-  /** The steered path: initial heading, Tongue Length at the press, segment length, one heading per segment. */
+  /** The flown 3D path: launch heading and pitch, Tongue Length at the press, segment length, (heading, pitch) per segment. */
   tongueYaw0: number;
+  tonguePitch0: number;
   tongueMax: number;
   tongueSeg: number;
   tonguePath: ArrayLike<number>;
