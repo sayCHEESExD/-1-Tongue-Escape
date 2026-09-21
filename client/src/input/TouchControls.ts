@@ -2,8 +2,8 @@ import type { InputState } from './InputState.js';
 
 const ZONE_WIDTH = 0.5;
 const ZONE_TOP = 0.32;
-const RADIUS_VMIN = 0.15;
-const RADIUS_MIN = 46;
+const RADIUS_VMIN = 0.12;
+const RADIUS_MIN = 36;
 const RADIUS_MAX = 84;
 const DEADZONE = 0.18;
 const LOOK_SENSITIVITY = 0.005;
@@ -284,9 +284,10 @@ const injectStyles = (): void => {
 .aoe-touch__stick {
   --aoe-stick-radius: 64px;
   position: fixed;
-  left: calc(var(--aoe-safe-l, 0px) + 26px + var(--aoe-stick-radius));
+  left: calc(env(safe-area-inset-left, 0px) + 26px + var(--aoe-stick-radius));
   top: auto;
-  bottom: calc(var(--aoe-safe-b, 0px) + 26px);
+  /* Lifted clear of the level bar when the HUD asks (an upright phone). */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + max(14px, calc(26 * var(--u, 1px))) + var(--aoe-controls-lift, 0px));
   width: calc(var(--aoe-stick-radius) * 2);
   height: calc(var(--aoe-stick-radius) * 2);
   margin: calc(var(--aoe-stick-radius) * -1) 0 0 calc(var(--aoe-stick-radius) * -1);
@@ -314,7 +315,7 @@ const injectStyles = (): void => {
 /* The two action buttons: chunky rounded plates with a dark rim. */
 .aoe-touch__jump {
   position: fixed;
-  bottom: calc(var(--aoe-safe-b, 0px) + 30px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + max(16px, calc(30 * var(--u, 1px))) + var(--aoe-controls-lift, 0px));
   width: var(--aoe-jump-size);
   height: var(--aoe-jump-size);
   padding: 0;
@@ -333,22 +334,11 @@ const injectStyles = (): void => {
   overflow: hidden;
 }
 .aoe-touch__jump {
-  right: calc(var(--aoe-safe-r, 0px) + 24px);
+  right: calc(env(safe-area-inset-right, 0px) + 24px);
   background: linear-gradient(180deg, #ff9ecb, #ff4f9a);
 }
 .aoe-touch__jump.is-down { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); }
 
-/*
- * A phone on its side: the HUD rail stands down the left edge at its middle,
- * so the stick's rest position moves right by the rail's lane. The rail is
- * 46px of tile plus its margin; --aoe-rail-lane is set by the HUD stylesheet
- * on the same media query, and falls back to the same figure here.
- */
-@media (orientation: landscape) and (max-height: 500px) {
-  .aoe-touch__stick {
-    left: calc(var(--aoe-safe-l, 0px) + 26px + var(--aoe-rail-lane, 66px) + var(--aoe-stick-radius));
-  }
-}
 `;
   document.head.append(style);
 };

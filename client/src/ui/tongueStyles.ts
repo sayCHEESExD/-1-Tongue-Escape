@@ -6,11 +6,16 @@ import { injectHudStyles } from './hudStyles.js';
  *
  *   - top-left: a big trophy and the Wins count;
  *   - down the left: chunky square tiles in a two-column grid, label across
- *     the bottom edge, red "!" badge when something can be done;
+ *     the bottom edge, red "!" badge when something can be done - anchored to
+ *     the LEFT edge at its VERTICAL CENTRE;
  *   - bottom centre: "Total Tongue: N", "Rebirth: +N%" at the bar's right
  *     shoulder, and the cyan studded level bar - "Level 1 ... 12/17";
  *   - top centre: one green hint line;
  *   - the Rebirth and Trails menus: studded light-grey cards, a red X.
+ *
+ * EVERY SIZE AND OFFSET IS IN HUD UNITS (var(--u), defined in the shared sheet),
+ * with a pixel floor only where text must stay readable: the whole HUD scales
+ * and re-anchors together with the viewport - no per-device sizes.
  *
  * NO BACKTICKS IN THE STYLESHEET: it is a template literal.
  */
@@ -30,6 +35,22 @@ export const injectTongueStyles = (): void => {
   --te-purple: #b04dff;
   --te-studs: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.55) 0 22%, rgba(0,0,0,0.07) 24% 28%, transparent 30%),
     linear-gradient(135deg, rgba(255,255,255,0.35), rgba(0,0,0,0.06));
+
+  /*
+   * THE HUD'S GEOMETRY, in HUD units (var(--u), see the shared sheet): one
+   * place for every size and offset, so the whole HUD scales and re-anchors
+   * together. Other rules - the touch controls included - read these.
+   */
+  --te-edge: max(10px, calc(18 * var(--u)));
+  --te-top: calc(max(10px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px));
+  --te-tile: calc(122 * var(--u));
+  --te-tile-gap-x: calc(16 * var(--u));
+  --te-tile-gap-y: calc(30 * var(--u));
+  --te-hud-bottom: max(calc(12 * var(--u)), env(safe-area-inset-bottom, 0px));
+  --te-hud-top-h: calc(62 * var(--u));
+  --te-bar-h: calc(62 * var(--u));
+  /* The whole bottom block, bar and "Total Tongue" line, from the screen's bottom edge. */
+  --te-hud-reserve: calc(var(--te-hud-bottom) + var(--te-hud-top-h) + var(--te-bar-h) + 8px);
 }
 .te-outline {
   color: #fff;
@@ -41,64 +62,66 @@ export const injectTongueStyles = (): void => {
 
 /* ---- Wins: the trophy, top-left ------------------------------------------ */
 .aoe-wins {
-  left: max(18px, env(safe-area-inset-left, 0px));
-  top: calc(max(10px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px) + 58px);
+  left: max(var(--te-edge), env(safe-area-inset-left, 0px));
+  /* Below the top-centre hint line even when it wraps on a narrow screen. */
+  top: calc(var(--te-top) + max(50px, calc(58 * var(--u))));
   transform: none;
-  gap: 4px;
+  gap: calc(4 * var(--u));
 }
-.aoe-wins__icon { width: clamp(58px, 6.4vw, 112px); height: clamp(58px, 6.4vw, 112px); }
+.aoe-wins__icon { width: calc(112 * var(--u)); height: calc(112 * var(--u)); }
 .aoe-wins__value {
-  font-size: clamp(44px, 5.2vw, 88px);
+  font-size: calc(88 * var(--u));
   color: #ffffff;
 }
 
-/* ---- The left tiles: a two-column grid ------------------------------------ */
+/* ---- The left tiles: a two-column grid, anchored LEFT + VERTICAL CENTRE ---- */
 .aoe-rail {
-  --gs-rail: clamp(78px, 7vw, 122px);
-  top: calc(max(10px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px) + clamp(128px, 14.5vw, 186px));
-  transform: none;
+  --gs-rail: var(--te-tile);
+  left: max(var(--te-edge), env(safe-area-inset-left, 0px));
+  top: 50%;
+  transform: translateY(-50%);
   display: grid;
   grid-template-columns: repeat(2, var(--gs-rail));
-  gap: 30px 16px;
+  gap: var(--te-tile-gap-y) var(--te-tile-gap-x);
 }
-.aoe-tile { border-radius: 14px; }
+.aoe-tile { border-radius: calc(14 * var(--u)); }
 .aoe-tile .aoe-icon { width: 78%; height: 78%; object-fit: contain; filter: drop-shadow(0 3px 3px rgba(0,0,0,0.35)); }
-.aoe-tile__label { font-size: clamp(17px, 1.9vw, 34px); bottom: -16px; }
+.aoe-tile__label { font-size: max(11px, calc(34 * var(--u))); bottom: calc(-16 * var(--u)); }
 .aoe-tile--trails { --tile-a: #ff6be0; --tile-b: #a44bff; }
 .aoe-tile--rebirth { --tile-a: #58b8ff; --tile-b: #2f6fe0; }
 .aoe-tile--audio { --tile-a: #ffec5c; --tile-b: #f5b800; }
 .aoe-tile--bux { --tile-a: #6fe06a; --tile-b: #2f9e2b; }
 
-/* ---- Bottom centre: Total Tongue and the level bar ------------------------- */
+/* ---- Bottom centre: Total Tongue and the level bar, anchored BOTTOM + CENTRE ---- */
 .te-hud {
   position: fixed;
   left: 50%;
-  bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  bottom: var(--te-hud-bottom);
   transform: translateX(-50%);
-  width: min(42vw, 780px);
-  min-width: 300px;
+  /* Scales with the HUD; never the full width of a phone. */
+  width: min(calc(780 * var(--u)), 80vw);
   pointer-events: none;
   user-select: none;
   z-index: 20;
   font-family: var(--gs-font);
   font-weight: 700;
 }
-.te-hud__top { position: relative; height: clamp(40px, 4.4vw, 62px); }
+.te-hud__top { position: relative; height: var(--te-hud-top-h); }
 .te-hud__total {
   position: absolute;
   left: 50%;
   bottom: 2px;
   transform: translateX(-50%);
   white-space: nowrap;
-  font-size: clamp(24px, 2.4vw, 44px);
+  font-size: max(14px, calc(44 * var(--u)));
   line-height: 1;
 }
 .te-hud__rebirth {
   position: absolute;
   right: 0;
-  bottom: 4px;
+  bottom: calc(4 * var(--u));
   white-space: nowrap;
-  font-size: clamp(16px, 1.45vw, 28px);
+  font-size: max(10px, calc(28 * var(--u)));
   color: #c678ff;
   text-shadow:
     2px 0 0 #2a0b52, -2px 0 0 #2a0b52, 0 2px 0 #2a0b52, 0 -2px 0 #2a0b52,
@@ -106,20 +129,20 @@ export const injectTongueStyles = (): void => {
 }
 .te-bar {
   position: relative;
-  height: clamp(38px, 3.6vw, 62px);
-  border: 4px solid var(--te-ink);
-  border-radius: 10px;
+  height: var(--te-bar-h);
+  border: max(2px, calc(4 * var(--u))) solid var(--te-ink);
+  border-radius: calc(10 * var(--u));
   background: #e9ecf2;
-  background-image: repeating-linear-gradient(90deg, rgba(0,0,0,0.07) 0 3px, transparent 3px 26px);
+  background-image: repeating-linear-gradient(90deg, rgba(0,0,0,0.07) 0 3px, transparent 3px calc(26 * var(--u)));
   overflow: hidden;
-  box-shadow: 0 5px 0 rgba(0,0,0,0.25);
+  box-shadow: 0 calc(5 * var(--u)) 0 rgba(0,0,0,0.25);
 }
 .te-bar__fill {
   position: absolute;
   inset: 0 auto 0 0;
   width: 0%;
   background:
-    repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 3px, transparent 3px 26px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 3px, transparent 3px calc(26 * var(--u))),
     linear-gradient(180deg, #6fe2ff, var(--te-cyan) 55%, var(--te-cyan-dark));
   border-right: 3px solid rgba(20,26,46,0.35);
   transition: width 180ms ease-out;
@@ -128,28 +151,32 @@ export const injectTongueStyles = (): void => {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  font-size: clamp(20px, 2.1vw, 40px);
+  font-size: max(13px, calc(40 * var(--u)));
   line-height: 1;
   white-space: nowrap;
 }
-.te-bar__level { left: 14px; }
-.te-bar__count { right: 14px; }
+.te-bar__level { left: calc(14 * var(--u)); }
+.te-bar__count { right: calc(14 * var(--u)); }
 .te-hud--up .te-hud__total { animation: te-bump 420ms ease-out; }
 @keyframes te-bump { 0% { transform: translateX(-50%) scale(1); } 35% { transform: translateX(-50%) scale(1.12); } 100% { transform: translateX(-50%) scale(1); } }
 
 /* ---- The hint line, top centre -------------------------------------------- */
 .te-hint {
   position: fixed;
-  top: calc(max(10px, env(safe-area-inset-top, 0px)) + 14px);
+  top: calc(var(--te-top) + calc(14 * var(--u)));
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
   pointer-events: none;
   font-family: var(--gs-font);
   font-weight: 700;
-  font-size: clamp(15px, 1.5vw, 26px);
+  font-size: max(12px, calc(26 * var(--u)));
   color: #5dff6a;
-  white-space: nowrap;
+  /* One line where it fits; wraps between the top corners (wins, account) where it does not. */
+  width: max-content;
+  max-width: calc(100vw - 2 * max(84px, calc(170 * var(--u))));
+  text-align: center;
+  line-height: 1.2;
   text-shadow:
     2px 0 0 #0d3a12, -2px 0 0 #0d3a12, 0 2px 0 #0d3a12, 0 -2px 0 #0d3a12,
     2px 2px 0 #0d3a12, -2px 2px 0 #0d3a12, 2px -2px 0 #0d3a12, -2px -2px 0 #0d3a12;
@@ -165,15 +192,16 @@ export const injectTongueStyles = (): void => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: calc(8 * var(--u));
   z-index: 30;
   pointer-events: none;
+  max-width: 90vw;
 }
 .te-toast {
   font-family: var(--gs-font);
   font-weight: 700;
-  font-size: clamp(18px, 1.9vw, 32px);
-  white-space: nowrap;
+  font-size: max(13px, calc(32 * var(--u)));
+  text-align: center;
   animation: te-toast 2400ms ease-out forwards;
 }
 .te-toast--good { color: #5dff6a; }
@@ -186,6 +214,16 @@ export const injectTongueStyles = (): void => {
   18% { transform: scale(1); }
   80% { opacity: 1; }
   100% { opacity: 0; transform: translateY(-18px); }
+}
+
+/* ---- XP pops: "+3" at random spots, in the level bar's cyan ----------------- */
+.te-xp-pop__value {
+  font-size: max(16px, calc(46 * var(--u)));
+  color: #6fe2ff;
+  text-shadow:
+    3px 0 0 #0b3c66, -3px 0 0 #0b3c66, 0 3px 0 #0b3c66, 0 -3px 0 #0b3c66,
+    2px 2px 0 #0b3c66, -2px 2px 0 #0b3c66, 2px -2px 0 #0b3c66, -2px -2px 0 #0b3c66,
+    0 4px 6px rgba(0, 0, 0, 0.35);
 }
 
 /* ---- The level-up popup ---------------------------------------------------- */
@@ -201,17 +239,17 @@ export const injectTongueStyles = (): void => {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 10px 28px 12px;
-  border-radius: 18px;
+  padding: calc(10 * var(--u)) calc(28 * var(--u)) calc(12 * var(--u));
+  border-radius: calc(18 * var(--u));
   background: radial-gradient(ellipse at center, rgba(10, 16, 34, 0.55), rgba(10, 16, 34, 0) 72%);
   font-family: var(--gs-font);
   font-weight: 700;
   white-space: nowrap;
 }
 .te-lvl[hidden] { display: none; }
-.te-lvl__title { font-size: clamp(16px, 1.5vw, 26px); letter-spacing: 0.08em; color: #ffffff; }
+.te-lvl__title { font-size: max(11px, calc(26 * var(--u))); letter-spacing: 0.08em; color: #ffffff; }
 .te-lvl__levels {
-  font-size: clamp(26px, 2.8vw, 48px);
+  font-size: max(18px, calc(48 * var(--u)));
   line-height: 1.1;
   color: #4fd8ff;
   text-shadow:
@@ -221,7 +259,7 @@ export const injectTongueStyles = (): void => {
 }
 .te-lvl__tongue {
   position: relative;
-  font-size: clamp(28px, 3vw, 52px);
+  font-size: max(19px, calc(52 * var(--u)));
   line-height: 1.1;
   color: #ff9a12;
   text-shadow:
@@ -240,7 +278,7 @@ export const injectTongueStyles = (): void => {
   background-clip: text;
   color: transparent;
 }
-.te-lvl__gain { font-size: clamp(18px, 1.8vw, 30px); color: #5dff6a; }
+.te-lvl__gain { font-size: max(12px, calc(30 * var(--u))); color: #5dff6a; }
 .te-lvl--in { animation: te-lvl-in 460ms cubic-bezier(0.2, 1.4, 0.4, 1) both; }
 .te-lvl--out { animation: te-lvl-out 450ms ease-in forwards; }
 @keyframes te-lvl-in {
@@ -254,11 +292,6 @@ export const injectTongueStyles = (): void => {
 @media (prefers-reduced-motion: reduce) {
   .te-lvl--in, .te-lvl--out { animation-duration: 1ms; }
 }
-@media (orientation: landscape) and (max-height: 500px) {
-  .te-lvl { top: 16%; }
-  .te-lvl__levels { font-size: 22px; }
-  .te-lvl__tongue { font-size: 24px; }
-}
 
 /* ---- The music tile: the supplied speaker, struck through when muted ------ */
 .aoe-tile--audio .aoe-icon { width: 74%; height: 74%; }
@@ -268,11 +301,11 @@ export const injectTongueStyles = (): void => {
   left: 14%;
   right: 14%;
   top: 50%;
-  height: 7px;
-  margin-top: -3px;
-  border-radius: 4px;
+  height: max(3px, calc(7 * var(--u)));
+  margin-top: max(-3px, calc(-3 * var(--u)));
+  border-radius: calc(4 * var(--u));
   background: #ff3b3b;
-  border: 2px solid var(--te-ink);
+  border: max(1px, calc(2 * var(--u))) solid var(--te-ink);
   transform: rotate(-40deg);
   pointer-events: none;
 }
@@ -378,31 +411,23 @@ export const injectTongueStyles = (): void => {
 .te-trail__buy { display: flex; align-items: center; gap: 8px; min-width: 150px; justify-content: center; }
 .te-trail__buy .aoe-icon { height: 1.2em; width: auto; }
 
-body.aoe-touch-mode .te-hud { width: min(62vw, 520px); bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
-@media (orientation: landscape) and (max-height: 500px) {
-  .te-hud { width: min(46vw, 460px); }
-  .te-hud__top { height: 30px; }
-  .te-hud__total { font-size: 20px; }
-  .te-hud__rebirth { font-size: 13px; }
-  .te-bar { height: 30px; border-width: 3px; }
-  .te-bar__level, .te-bar__count { font-size: 17px; }
-  .aoe-wins { top: calc(max(6px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px)); }
-  .aoe-wins__icon { width: 38px; height: 38px; }
-  .aoe-wins__value { font-size: 30px; }
-  body .aoe-rail, body.aoe-touch-mode .aoe-rail, body:not(.aoe-touch-mode) .aoe-rail {
-    --gs-rail: 50px;
-    display: grid;
-    grid-template-columns: repeat(2, var(--gs-rail));
-    top: calc(max(6px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px) + 50px);
-    transform: none;
-    gap: 10px;
-  }
-  .te-hint { font-size: 13px; top: 6px; }
+/*
+ * TOUCH: the stick and the TONGUE button share the bottom corners with the
+ * level bar. Upright, there is no room beside the bar, so the controls stand
+ * on top of it (the bar stays anchored to the bottom). Sideways, the bar fits
+ * between them: it narrows, if it has to, to the gap they leave.
+ */
+@media (orientation: portrait) {
+  body.aoe-touch-mode { --aoe-controls-lift: var(--te-hud-reserve); }
 }
-@media (max-width: 640px) and (orientation: portrait) {
-  .te-hud { width: 88vw; }
-  .aoe-rail { --gs-rail: 62px; gap: 22px 10px; }
-  .te-hint { font-size: 13px; white-space: normal; text-align: center; width: 80vw; }
+@media (orientation: landscape) {
+  body.aoe-touch-mode .te-hud {
+    width: min(
+      calc(780 * var(--u)),
+      80vw,
+      calc(100vw - 2 * (max(26px + 2 * var(--aoe-stick-radius, 48px), 24px + var(--aoe-jump-size, 88px)) + 12px))
+    );
+  }
 }
 `;
   document.head.appendChild(style);

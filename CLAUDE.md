@@ -69,6 +69,12 @@ Do NOT use python from the Bash tool on this machine (Windows Store stub stalls)
   Stage dressing (turf, props, trees, gateways, lazy signs) is client-only:
   `client/src/config/stageThemes.ts` + `client/src/world/StageDecor.ts` (merge only non-indexed geometry).
 - No checkpoints: any death returns to spawn; a win pad banks Wins and returns to spawn.
+- **Responsive HUD: one unit.** Every HUD size/offset is a multiple of `--u` (`client/src/ui/hudStyles.ts` :root):
+  1px of a 1920x1080 (or 1080x1920 upright) design, fitted to the viewport, clamped [min(0.4px, 100vh/900), 1.35px].
+  Write `calc(N * var(--u))`, with a px floor via `max()` only for readable text / touch size. No per-device sizes,
+  no fixed-px HUD dimensions. Anchors: left tiles LEFT + VERTICAL CENTRE; level bar BOTTOM + CENTRE (max 80vw); in
+  touch mode an upright screen lifts the stick/TONGUE button above the bar (`--aoe-controls-lift`), a sideways one
+  narrows the bar to the gap between them. Layout geometry vars live in `tongueStyles.ts` :root (`--te-*`).
 - **One surface style.** Every stylised mesh uses the spawn stud plate: `worldTextures.stud(color)`
   (shared singleton in `client/src/world/WorldTextures.ts`) on `texturedBox(..., 4)` geometry, or
   world-scaled UVs for curved pieces. Only the treadmill belt tread, signs and tongue skins differ.

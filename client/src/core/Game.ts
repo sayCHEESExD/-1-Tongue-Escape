@@ -33,6 +33,7 @@ import { RailButton } from '../ui/RailButton.js';
 import { RebirthPanel } from '../ui/RebirthPanel.js';
 import { HintLine, Toasts } from '../ui/Toasts.js';
 import { LevelUpPopup } from '../ui/LevelUpPopup.js';
+import { XpPopups } from '../ui/XpPopups.js';
 import { TongueHud } from '../ui/TongueHud.js';
 import { TrailsPanel } from '../ui/TrailsPanel.js';
 import { WinsCounter } from '../ui/WinsCounter.js';
@@ -77,6 +78,9 @@ export class Game {
   private readonly hint: HintLine;
   private readonly toasts: Toasts;
   private readonly levelUp: LevelUpPopup;
+  private readonly xpPops: XpPopups;
+  /** XP at the last state, for the "+N" pops; -1 until the first state arrives. */
+  private lastXp = -1;
   private readonly rail: HTMLDivElement;
   private readonly trailsButton: RailButton;
   private readonly rebirthButton: RailButton;
@@ -114,6 +118,7 @@ export class Game {
     this.hint = new HintLine(container);
     this.toasts = new Toasts(container);
     this.levelUp = new LevelUpPopup(container);
+    this.xpPops = new XpPopups(container);
 
     this.rail = document.createElement('div');
     this.rail.className = 'aoe-rail';
@@ -480,6 +485,11 @@ export class Game {
     }
 
     this.hud.update(state.xp, state.tongueLength, state.rebirths);
+    // XP GAINED pops up as "+N" around the screen - never the first state, never a rebirth's reset.
+    if (this.lastXp >= 0 && state.xp > this.lastXp && state.rebirths === this.lastRebirths) {
+      this.xpPops.show(state.xp - this.lastXp);
+    }
+    this.lastXp = state.xp;
     this.wins.update(state.wins);
     this.world.stage.setInventory(state.wins, state.ownedTongues, state.tongueSlot);
     this.world.training.setRebirths(state.rebirths);
@@ -544,6 +554,7 @@ export class Game {
     this.hint.dispose();
     this.toasts.dispose();
     this.levelUp.dispose();
+    this.xpPops.dispose();
     window.removeEventListener('keydown', this.onHotkey);
     window.removeEventListener('keydown', this.onGesture);
     window.removeEventListener('mousedown', this.onGesture);

@@ -18,7 +18,21 @@ export const injectHudStyles = (): void => {
   const style = document.createElement('style');
   style.textContent = `
 :root {
-  --gs-rail: 82px;
+  /*
+   * THE HUD UNIT. Every HUD size and offset is a multiple of it, so the whole
+   * HUD scales as one - smoothly, with the viewport, never per device.
+   *
+   * One unit is one pixel of the HUD as designed for a 1920x1080 screen (or
+   * 1080x1920 held upright): the viewport's fit to whichever of the two it
+   * matches better, so a window keeps its HUD in proportion as it is resized
+   * and a phone keeps it in proportion whichever way it is held. Bounded both
+   * ways: never so small that a tile is not a comfortable touch target (0.4 -
+   * a 49px tile; only a very short screen, under 360px, goes a little below,
+   * so the HUD still fits its height), never so large on a huge screen that
+   * the HUD crowds it.
+   */
+  --u: clamp(min(0.4px, 100vh / 900), max(min(100vw / 1920, 100vh / 1080), min(100vw / 1080, 100vh / 1920)), 1.35px);
+  --gs-rail: calc(82 * var(--u));
   --gs-ink: #1c2233;
   --gs-font: "Fredoka", "Baloo 2", "Nunito", "Segoe UI", system-ui, sans-serif;
   --gs-blue: #3fa9ff;
@@ -92,12 +106,12 @@ export const injectHudStyles = (): void => {
 /* ---- Left rail ---------------------------------------------------------- */
 .aoe-rail {
   position: fixed;
-  left: max(16px, env(safe-area-inset-left, 0px));
+  left: max(10px, calc(16 * var(--u)), env(safe-area-inset-left, 0px));
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: calc(22 * var(--u));
   z-index: 21;
   user-select: none;
 }
@@ -106,10 +120,10 @@ export const injectHudStyles = (): void => {
   position: relative;
   width: var(--gs-rail);
   height: var(--gs-rail);
-  border: 4px solid var(--gs-ink);
-  border-radius: 18px;
+  border: max(2px, calc(4 * var(--u))) solid var(--gs-ink);
+  border-radius: calc(18 * var(--u));
   background: linear-gradient(180deg, var(--tile-a, #9b6bff), var(--tile-b, #6d3fd6));
-  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.28), inset 0 3px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 calc(6 * var(--u)) 0 rgba(0, 0, 0, 0.28), inset 0 calc(3 * var(--u)) 0 rgba(255, 255, 255, 0.35);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -117,7 +131,7 @@ export const injectHudStyles = (): void => {
   transition: transform 110ms ease;
 }
 .aoe-tile:hover { transform: scale(1.06); }
-.aoe-tile:active { transform: translateY(3px); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.28); }
+.aoe-tile:active { transform: translateY(calc(3 * var(--u))); box-shadow: 0 calc(3 * var(--u)) 0 rgba(0, 0, 0, 0.28); }
 .aoe-tile .aoe-icon {
   width: 70%;
   height: 70%;
@@ -128,42 +142,45 @@ export const injectHudStyles = (): void => {
 .aoe-tile__label {
   position: absolute;
   left: 50%;
-  bottom: -15px;
+  bottom: calc(-15 * var(--u));
   transform: translateX(-50%);
   font-family: var(--gs-font);
   font-weight: 700;
-  font-size: clamp(12px, 1.2vw, 16px);
+  font-size: max(11px, calc(16 * var(--u)));
   line-height: 1;
   white-space: nowrap;
   pointer-events: none;
 }
 .aoe-tile__key {
   position: absolute;
-  right: -6px;
-  top: -6px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
+  right: calc(-6 * var(--u));
+  top: calc(-6 * var(--u));
+  min-width: max(14px, calc(20 * var(--u)));
+  height: max(14px, calc(20 * var(--u)));
+  padding: 0 calc(5 * var(--u));
   box-sizing: border-box;
-  border: 2px solid var(--gs-ink);
-  border-radius: 7px;
+  border: max(1px, calc(2 * var(--u))) solid var(--gs-ink);
+  border-radius: calc(7 * var(--u));
   background: #ffffff;
   color: var(--gs-ink);
   font-family: var(--gs-font);
   font-weight: 700;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: max(9px, calc(11 * var(--u)));
+  display: grid;
+  place-items: center;
+  line-height: 1;
   text-align: center;
   pointer-events: none;
 }
 body.aoe-touch-mode .aoe-tile__key { display: none; }
 .aoe-tile__badge {
   position: absolute;
-  left: -9px;
-  top: -9px;
-  width: 22px;
-  height: 22px;
-  border: 3px solid var(--gs-ink);
+  left: calc(-9 * var(--u));
+  top: calc(-9 * var(--u));
+  width: max(12px, calc(22 * var(--u)));
+  height: max(12px, calc(22 * var(--u)));
+  box-sizing: border-box;
+  border: max(2px, calc(3 * var(--u))) solid var(--gs-ink);
   border-radius: 50%;
   background: var(--gs-red);
   display: none;
@@ -185,41 +202,41 @@ body.aoe-touch-mode .aoe-tile__key { display: none; }
 /* ---- Bloxity account chip, top right ----------------------------------- */
 .aoe-account {
   position: fixed;
-  top: 12px;
-  right: 12px;
+  top: max(8px, calc(12 * var(--u)), env(safe-area-inset-top, 0px));
+  right: max(8px, calc(12 * var(--u)), env(safe-area-inset-right, 0px));
   z-index: 23;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: calc(6 * var(--u));
 }
 .aoe-account__row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 12px 4px 4px;
-  border: 3px solid var(--gs-ink);
+  gap: calc(8 * var(--u));
+  padding: calc(4 * var(--u)) calc(12 * var(--u)) calc(4 * var(--u)) calc(4 * var(--u));
+  border: max(2px, calc(3 * var(--u))) solid var(--gs-ink);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
 }
-.aoe-account__pfp { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--gs-ink); object-fit: cover; }
-.aoe-account__name { font-size: clamp(12px, 1.2vw, 15px); color: var(--gs-ink); max-width: 22vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aoe-account__note { font-size: clamp(11px, 1vw, 13px); color: #ffffff; }
-.aoe-account__actions { display: flex; gap: 6px; }
+.aoe-account__pfp { width: max(22px, calc(30 * var(--u))); height: max(22px, calc(30 * var(--u))); border-radius: 50%; border: 2px solid var(--gs-ink); object-fit: cover; }
+.aoe-account__name { font-size: max(11px, calc(15 * var(--u))); color: var(--gs-ink); max-width: 22vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aoe-account__note { font-size: max(10px, calc(13 * var(--u))); color: #ffffff; }
+.aoe-account__actions { display: flex; gap: calc(6 * var(--u)); }
 .aoe-account__btn,
 .aoe-account__login {
   cursor: pointer;
-  border: 3px solid var(--gs-ink);
-  border-radius: 12px;
-  padding: 6px 12px;
+  border: max(2px, calc(3 * var(--u))) solid var(--gs-ink);
+  border-radius: calc(12 * var(--u));
+  padding: max(4px, calc(6 * var(--u))) max(8px, calc(12 * var(--u)));
   font-family: var(--gs-font);
   font-weight: 700;
-  font-size: clamp(11px, 1vw, 13px);
+  font-size: max(11px, calc(13 * var(--u)));
   color: #ffffff;
   background: linear-gradient(180deg, var(--gs-blue), var(--gs-blue-dark));
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+  box-shadow: 0 calc(3 * var(--u)) 0 rgba(0, 0, 0, 0.3);
 }
-.aoe-account__login { background: linear-gradient(180deg, var(--gs-green), var(--gs-green-dark)); padding: 8px 16px; }
+.aoe-account__login { background: linear-gradient(180deg, var(--gs-green), var(--gs-green-dark)); padding: max(5px, calc(8 * var(--u))) max(10px, calc(16 * var(--u))); }
 .aoe-account__btn:hover, .aoe-account__login:hover { filter: brightness(1.08); }
 body.aoe-touch-mode .aoe-account__name { max-width: 30vw; }
 
@@ -546,7 +563,6 @@ body.aoe-touch-mode .aoe-account__name { max-width: 30vw; }
   100% { opacity: 0; transform: translate(-50%, -125%) rotate(var(--aoe-pop-tilt)) scale(var(--aoe-pop-scale)); }
 }
 
-body.aoe-touch-mode .aoe-rail { --gs-rail: 64px; gap: 20px; }
 
 @media (prefers-reduced-motion: reduce) {
   .aoe-tile, .aoe-wins--pop .aoe-wins__value { transition: none; animation: none; }
@@ -558,53 +574,16 @@ body.aoe-touch-mode .aoe-rail { --gs-rail: 64px; gap: 20px; }
   }
 }
 
-/*
- * A PHONE ON ITS SIDE: the rail stays a column, snapped to the LEFT MIDDLE at
- * a smaller tile size, and the level block sits at the BOTTOM CENTRE. The
- * joystick moves right by the rail's width (see TouchControls) so the two
- * never share the corner.
- */
-@media (orientation: landscape) and (max-height: 500px) {
-  body.aoe-touch-mode {
-    --aoe-rail-lane: 66px;
-    --aoe-stick-zone: calc(26px + env(safe-area-inset-left, 0px) + var(--aoe-rail-lane) + var(--aoe-stick-radius, 64px) * 2);
-    --aoe-jump-zone: calc(24px + env(safe-area-inset-right, 0px) + var(--aoe-jump-size, 88px) * 2 + 16px);
-  }
-  /* Both forms for specificity: the touch-mode rail rule above must lose here. */
-  body.aoe-touch-mode .aoe-rail,
-  body:not(.aoe-touch-mode) .aoe-rail {
-    --gs-rail: 46px;
-    top: 50%;
-    left: max(10px, env(safe-area-inset-left, 0px));
-    transform: translateY(-50%);
-    flex-direction: column;
-    flex-wrap: nowrap;
-    gap: 8px;
-    max-height: none;
-  }
-  body .aoe-tile__label { display: none; }
-  body .aoe-tile { border-radius: 12px; border-width: 3px; }
-  body.aoe-touch-mode .aoe-wins { top: max(6px, env(safe-area-inset-top, 0px)); }
-  body.aoe-touch-mode .aoe-wins__icon { width: 26px; height: 26px; }
-  body.aoe-touch-mode .aoe-wins__value { font-size: 19px; }
-  body.aoe-touch-mode .aoe-fps { top: auto; bottom: 6px; left: 50%; transform: translateX(-50%); }
-  body.aoe-touch-mode .aoe-panel__box { max-height: 92vh; }
+/* A short screen: menus may use nearly all of its height (their bodies scroll). */
+@media (max-height: 500px) {
+  .aoe-panel__box { max-height: 94vh; }
 }
 
 /*
  * THE PORTAL'S CORNER, RESERVED. The portal draws its own controls in the
- * top-left; a rail centred on the left edge sits below them, so in landscape
- * nothing has to move. In portrait the wins counter drops under the strip.
+ * top-left; the HUD's top edge (--aoe-portal-top) moves down past them.
  */
 body.aoe-portal-embedded { --aoe-portal-top: 58px; --aoe-portal-left: 248px; }
-@media (max-width: 580px) {
-  body.aoe-portal-embedded .aoe-wins { top: calc(var(--aoe-portal-top) + 6px); }
-}
-/* A VERY SHORT landscape (old phones): tighter still, so four tiles fit the height. */
-@media (orientation: landscape) and (max-height: 340px) {
-  body.aoe-touch-mode .aoe-rail,
-  body:not(.aoe-touch-mode) .aoe-rail { --gs-rail: 40px; gap: 6px; }
-}
 `;
   document.head.appendChild(style);
 };
