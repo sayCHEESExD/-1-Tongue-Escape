@@ -31,6 +31,8 @@ const PLAYER_ID_KEY = 'tongue.playerId';
 
 /** Backoff between join attempts, in milliseconds. A cold host takes a while. */
 const JOIN_BACKOFF_MS = [1000, 2000, 4000, 8000, 15000] as const;
+/** After a full round of join attempts fails, wait this long and start another. */
+const RECONNECT_RETRY_MS = 5000;
 
 /**
  * The server's "storage unavailable" refusal. Not a failure of THIS join but
@@ -59,6 +61,10 @@ const resolvePlayerId = (): string => {
 export interface NetworkHandlers {
   onStatusChange?(status: ConnectionStatus, detail?: string): void;
   onSelfJoined?(sessionId: string): void;
+  /** The connection dropped without us leaving; a rejoin is under way. */
+  onConnectionLost?(): void;
+  /** Back in a room after a dropped connection. */
+  onReconnected?(): void;
   onPlayerAdded?(sessionId: string, player: NetPlayerState): void;
   onPlayerChanged?(sessionId: string, player: NetPlayerState): void;
   onPlayerRemoved?(sessionId: string): void;
@@ -77,6 +83,9 @@ export class NetworkClient {
   private client: Client | null = null;
   private room: Room<NetCourseState> | null = null;
   private status: ConnectionStatus = 'idle';
+  /** True once WE chose to leave: a leave then is not a dropped connection. */
+  private leaving = false;
+  private reconnecting = false;
   /** The portal's game token, asked for at join and on every login change. */
   private token: (() => string | null) | null = null;
   /** The last token the server was told about, so an unchanged one is not resent. */
@@ -247,6 +256,7 @@ export class NetworkClient {
   }
 
   async disconnect(): Promise<void> {
+    this.leaving = true;
     await this.room?.leave(true);
     this.room = null;
     this.sentToken = undefined;
@@ -295,8 +305,38 @@ export class NetworkClient {
 
     room.onLeave((code) => {
       logger.warn(SCOPE, `left room (code ${code})`);
-      this.setStatus('disconnected', `code ${code}`);
+      if (this.room !== room) return;
+      this.room = null;
+      this.sentToken = undefined;
+      if (this.leaving) {
+        this.setStatus('disconnected', `code ${code}`);
+        return;
+      }
+      // A DROPPED connection - the server restarted or redeployed, the
+      // network blipped. Without a room nothing answers: a player who dies now
+      // would lie in the lava forever. Rejoin, and keep trying until it works;
+      // the join places the player at spawn, which also ends a pending death.
+      this.handlers.onConnectionLost?.();
+      void this.reconnect();
     });
+  }
+
+  private async reconnect(): Promise<void> {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    this.setStatus('reconnecting');
+    while (!this.room && !this.leaving) {
+      try {
+        await this.connect();
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        logger.warn(SCOPE, `rejoin failed, retrying: ${detail}`);
+        this.setStatus('reconnecting', detail);
+        await sleep(RECONNECT_RETRY_MS);
+      }
+    }
+    this.reconnecting = false;
+    if (this.room) this.handlers.onReconnected?.();
   }
 
   private setStatus(status: ConnectionStatus, detail?: string): void {

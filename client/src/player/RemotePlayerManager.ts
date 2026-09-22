@@ -64,6 +64,11 @@ export class RemotePlayerManager {
     for (const id of this.visible) this.players.get(id)?.update(delta);
   }
 
+  /** Forget every remote player: the room they were in is gone. */
+  clear(): void {
+    for (const id of [...this.players.keys()]) this.remove(id);
+  }
+
   dispose(): void {
     for (const [id, player] of this.players) {
       this.hide(id, player);

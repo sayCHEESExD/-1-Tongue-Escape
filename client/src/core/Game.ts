@@ -81,6 +81,8 @@ export class Game {
   private readonly xpPops: XpPopups;
   /** XP at the last state, for the "+N" pops; -1 until the first state arrives. */
   private lastXp = -1;
+  /** Between a dropped connection and the rejoin: the hint line says so the whole time. */
+  private connectionLost = false;
   private readonly rail: HTMLDivElement;
   private readonly trailsButton: RailButton;
   private readonly rebirthButton: RailButton;
@@ -205,6 +207,19 @@ export class Game {
         this.pendingRespawn = message;
         this.localPlayer?.acknowledgeRespawn();
         this.applyPendingRespawn();
+      },
+      onConnectionLost: () => {
+        // The other players belong to the room that is gone; the rejoin brings the new room's.
+        this.remotePlayers.clear();
+        this.localSessionId = null;
+        // The rejoined profile's XP is not a gain to pop up.
+        this.lastXp = -1;
+        this.toasts.show('Connection lost - reconnecting...', 'bad');
+        this.connectionLost = true;
+      },
+      onReconnected: () => {
+        this.connectionLost = false;
+        this.toasts.show('Reconnected!', 'good');
       },
       onStageAwarded: (message) => this.onStageAwarded(message),
       onNotice: (message) => this.onNotice(message),
@@ -378,7 +393,9 @@ export class Game {
     // The next stage ahead that asks for more tongue than this player has.
     const ahead = STAGES.find((stage) => z > stage.startZ - 30 && z < stage.startZ + 10 && state.level < stage.recommendedLevel);
     let text = '';
-    if (player.tonguePhase === TonguePhase.Windup || player.tonguePhase === TonguePhase.Extend) {
+    if (this.connectionLost) {
+      text = 'Connection lost - reconnecting...';
+    } else if (player.tonguePhase === TonguePhase.Windup || player.tonguePhase === TonguePhase.Extend) {
       const touch = document.body.classList.contains('aoe-touch-mode');
       if (player.tongueControl === TongueControl.Player) {
         text = touch ? 'Steering: stick up to climb, down to dive, sideways to curve' : 'Steering: W climb, S dive, A / D curve';
